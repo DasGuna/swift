@@ -418,6 +418,23 @@ class Swift:
 
             return int(id)
 
+    # TEST GS IMPLEMENTATION 
+    def add_gs(self, path):
+        # TODO: validate the path before sending
+        # TEMP Creation of dict params to send
+        params = {'stype': 'gs', 'path': path}
+        if not self.headless:
+            id = int(self._send_socket("add_gs", [params]))
+
+            # TODO: Implement a similar wait as there is some time before it has been added
+            # while not int(self._send_socket("shape_mounted", [id, 1])):
+                # time.sleep(0.1)
+
+        # TODO: Implement a similar member variable to track gs requests
+        # NOTE: currently only handles one gs at a time
+        # self.swift_objects.append(ob)
+        return int(id)
+
     def remove(self, id):
         """
         Remove a robot/shape from the graphical scene

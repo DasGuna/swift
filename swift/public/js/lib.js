@@ -7,6 +7,8 @@ import { VRMLoader } from './vendor/examples/jsm/loaders/VRMLoader.js'
 import { PCDLoader } from './vendor/examples/jsm/loaders/PCDLoader.js'
 import { PLYLoader } from './vendor/examples/jsm/loaders/PLYLoader.js'
 import { GLTFLoader } from './vendor/examples/jsm/loaders/GLTFLoader.js'
+// TESTING GS PACKAGE IMPLEMENTATION
+import { DropInViewer } from '@mkkellogg/gaussian-splats-3d';
 
 const daeloader = new ColladaLoader();
 const stlloader = new STLLoader();
@@ -16,6 +18,8 @@ const vrmloader = new VRMLoader();
 const pcdloader = new PCDLoader();
 const plyloader = new PLYLoader();
 const gltfloader = new GLTFLoader();
+// TESTING GS PACKAGE IMPLEMENTATION
+const gs = new DropInViewer({'sharedMemoryForWorkers': false});
 
 let nav_div_showing = false;
 
@@ -36,7 +40,9 @@ function load(ob, scene, color, cb) {
         loadSphere(ob, scene, color, cb);
     } else if (ob.stype === 'cylinder') {
         loadCylinder(ob, scene, color, cb);
-    }
+    } else if (ob.stype === 'gs'){
+        loadGaussianSplat(ob, scene, cb);
+  }
 }
     
 function loadBox(ob, scene, color, cb) {
@@ -92,6 +98,23 @@ function loadCylinder(ob, scene, color, cb) {
     ob['mesh'] = cylinder;
     ob['loaded'] = true;
     cb();
+}
+
+// TEST ADDITION OF GS IMPLEMENTATION
+function loadGaussianSplat(ob, scene, cb) {
+  // Add the current path to our gs object (sent from swift server)
+  gs.addSplatScene(ob.path, {'splatAlphaRemovalThreshold': 5, 'showLoadingUI': true})
+
+  // Play with position, rotation, and scale updates as an option here 
+  // gs.rotation.x = Math.PI // EXAMPLE
+
+  // Add gs to our scene
+  // TODO: on call, we should remove an existing splat and load in a new one 
+  scene.add(gs);
+  gs.visible = true;
+
+  // Trigger callback to finish
+  cb();
 }
 
 function loadMesh(ob, scene, cb) {
@@ -459,6 +482,20 @@ class Shape{
         this.ob.mesh.material.dispose();
         scene.remove(this.ob.mesh);
     }
+}
+
+// TEST GS IMPLEMENTATION
+class GaussianSplat{
+  constructor(scene, ob) {
+    this.ob = ob
+    this.loaded = 0;
+    let cb = () => {
+      this.loaded = 1;
+    }
+
+    // Load the gs on construction
+    load(ob, scene, cb);
+  }
 }
 
 
@@ -850,4 +887,4 @@ class Radio {
 
 
 
-export {Robot, Shape, FPS, SimTime, Slider, Button, Label, Select, Checkbox, Radio};
+export {Robot, Shape, FPS, SimTime, Slider, Button, Label, Select, Checkbox, Radio, GaussianSplat};

@@ -8,7 +8,7 @@ THREE.Object3D.DefaultUp.set(0, 0, 1);
 // import * as tr from './vendor/three.module.js'
 
 import {OrbitControls} from './vendor/examples/jsm/controls/OrbitControls.js'
-import {Robot, Shape, FPS, SimTime, Slider, Button, Label, Select, Checkbox, Radio} from './lib.js'
+import {Robot, Shape, FPS, SimTime, Slider, Button, Label, Select, Checkbox, Radio, GaussianSplat} from './lib.js'
 // import { start } from 'repl';
 
 let fps = new FPS(document.getElementById('fps'));
@@ -19,6 +19,8 @@ let camera, scene, renderer, controls;
 // Array of all the robots in the scene
 let agents = [];
 let shapes = [];
+// TEST GS IMPLEMENTATION
+let gs_list = [];
 let custom_elements = [];
 
 let connected = false;
@@ -38,8 +40,6 @@ let autoclose = true;
 // let three = new Button({id: "1", desc: "Hello"})
 // let four = new Checkbox({id: "4", desc: "Check Box", options: ["one", '2', 'fourt'], checked: [0, 's', 0]})
 // let five = new Radio({id: "5", desc: "Radio Buttons", options: ["one long", '2', 'fourt'], checked: 1})
-
-
 
 ws.onopen = function(event) {
 	connected = true;
@@ -200,6 +200,12 @@ ws.onmessage = function (event) {
 		let robot = new Robot(scene, data);
 		agents.push(robot);
 		ws.send(id);
+  // TEST GS IMPLEMENTATION
+  } else if (func === 'add_gs') {
+    let id = gs_list.length;
+    let gs = new GaussianSplat(scene, data);
+    gs_list.push(gs);
+    ws.send(id);
 	} else if (func === 'remove_robot') {
 		let agent = agents[data]
 		agent.remove(scene)
