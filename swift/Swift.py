@@ -165,7 +165,7 @@ class Swift:
 
         if not self.headless:
             # The realtime, render and pause buttons
-            self._add_controls()
+            # self._add_controls()
 
             # A flag for our threads to monitor for when to quit
             self._run_thread = True
@@ -355,6 +355,7 @@ class Swift:
         if isinstance(ob, Shape):
             ob._propogate_scene_tree()
             ob._added_to_swift = True
+            print(f"params sent: {ob.to_dict()}")
             if not self.headless:
                 id = int(self._send_socket("shape", [ob.to_dict()]))
 
@@ -419,12 +420,13 @@ class Swift:
             return int(id)
 
     # TEST GS IMPLEMENTATION 
-    def add_gs(self, path):
+    def add_splat(self, params):
         # TODO: validate the path before sending
         # TEMP Creation of dict params to send
-        params = {'stype': 'gs', 'path': path}
+        # TODO: add other params, such as position, orientation, etc...
         if not self.headless:
-            id = int(self._send_socket("add_gs", [params]))
+            # Send the shape function command to mount provided splat path
+            id = int(self._send_socket("shape", [params]))
 
             # TODO: Implement a similar wait as there is some time before it has been added
             # while not int(self._send_socket("shape_mounted", [id, 1])):

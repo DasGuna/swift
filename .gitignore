@@ -249,3 +249,6 @@ CATKIN_IGNORE
 .history
 
 .next
+
+# Extra ignores (temp)
+test.py
