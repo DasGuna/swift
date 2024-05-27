@@ -1,0 +1,3 @@
+[submodule "react-viz"]
+	path = react-viz
+	url = git@github.com:DasGuna/react-viz.git
