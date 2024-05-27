@@ -251,4 +251,5 @@ CATKIN_IGNORE
 .next
 
 # Extra ignores (temp)
-test.py
+examples/test_swift.py
+tests/*
