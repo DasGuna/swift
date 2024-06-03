@@ -105,6 +105,7 @@ def start_servers(
 
     server.start()
     server_port = inq.get()
+    print(f"Available at => http://localhost:{server_port}/?{socket_port}")
 
     if open_tab:
         if COLAB:
@@ -163,7 +164,7 @@ def start_servers(
         outq.put(offer_python)
     else:
         try:
-            inq.get(timeout=10)
+            inq.get(timeout=20)
         except Empty:
             print("\nCould not connect to the Swift simulator \n")
             raise
