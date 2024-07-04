@@ -174,6 +174,7 @@ class Swift:
                 self.inq,
                 self._servers_running,
                 browser=browser,
+                open_tab=False,
                 comms=self._comms,
             )
             self.last_time = time.time()
