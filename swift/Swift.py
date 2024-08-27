@@ -93,6 +93,7 @@ class Swift:
         self.rendering = True
         self._notrenderperiod = 1
         self.recording = False
+        self._connected = False
         self._laststep = time.time()
 
     @property
@@ -121,6 +122,7 @@ class Swift:
         headless: bool = False,
         rate: int = 60,
         browser: Union[str, None] = None,
+        open_tab: bool = False,
         comms: L["websocket", "rtc"] = "websocket",
         **kwargs,
     ):
@@ -157,12 +159,19 @@ class Swift:
         self.rate = rate
         self.realtime = realtime
         self.headless = headless
+        self.open_tab = open_tab
 
         if comms == "rtc":
             self._comms = "rtc"
         else:
             self._comms = "websocket"
 
+        # NOTE: Currently headless makes no attempt to connect to a running static page
+        # Ideally, the simulator should be agnostic of the static page (being available or not)
+        # Therefore, running headless means the sim runs as expected, however, a user should still 
+        # be able to open a broswer on the system and view the state of the simulation. This could also provide 
+        # added bonuses regarding GPU computation (say if the simulator was running on a lower PC, but the visualisation occured on 
+        # better hardware on the same network)
         if not self.headless:
             # The realtime, render and pause buttons
             # self._add_controls()
@@ -170,15 +179,19 @@ class Swift:
             # A flag for our threads to monitor for when to quit
             self._run_thread = True
             self.socket, self.server = start_servers(
-                self.outq,
-                self.inq,
-                self._servers_running,
+                outq=self.outq,
+                inq=self.inq,
+                stop_servers=self._servers_running,
+                connected_check=self._connected_check,
                 browser=browser,
-                open_tab=False,
                 comms=self._comms,
+                open_tab=self.open_tab
             )
             self.last_time = time.time()
 
+    def _connected_check(self, check: bool):
+        self._connected = check 
+        
     def _servers_running(self):
         return self._run_thread
 
@@ -229,6 +242,8 @@ class Swift:
 
         # Adjust sim time
         self.sim_time += dt
+
+        print(f"RUNNING => sim_time: {self.sim_time} | Connected: {self._connected}")
 
         if not self.headless:
 
@@ -320,6 +335,62 @@ class Swift:
     #
     #  Methods to interface with the robots created in other environemnts
     #
+    def serve_objects(self):
+        """Serve objects to a connected client 
+        """
+        # Iterate through existing swift objects 
+        # If connected, serve to client webpage (for visual display)
+        if not self._connected:
+            return
+
+        for obj in self.swift_objects:
+
+            if isinstance(ob, Shape):
+                # ob._propogate_scene_tree()
+                # ob._added_to_swift = True
+                # print(f"params sent: {ob.to_dict()}")
+                # NOTE: need to send the already configured ID to the webpage rather than get from the client
+                print(f"SHAPE params sent: {ob.to_dict()}")
+                id = int(self._send_socket("shape", [ob.to_dict()]))
+
+                while not int(self._send_socket("shape_mounted", [id, 1])):
+                    time.sleep(0.1)
+            elif isinstance(ob, SwiftElement):
+
+                # if ob._added_to_swift:
+                #     raise ValueError("This element has already been added to Swift")
+                #
+                # ob._added_to_swift = True
+                #
+                # id = 'customelement' + str(self.elementid)
+                # id = self.elementid
+                # self.elementid += 1
+                # self.elements[str(id)] = ob
+                # ob._id = id
+                #
+                # NOTE: need to send the already configured ID to the webpage rather than get from the client
+                print(f"ELEMENT params sent: {ob.to_dict()}")
+                self._send_socket("element", ob.to_dict())
+            elif isinstance(ob, rtb.Robot):
+
+                # # Update robot transforms
+                # ob._update_link_tf()
+                # ob._propogate_scene_tree()
+                #
+                # # Update robot qlim
+                # ob._qlim = ob.qlim
+                #
+                # if not self.headless:
+                print(f"Here adding robot object...{self._connected}")
+                robob = ob._to_dict(
+                    robot_alpha=robot_alpha, collision_alpha=collision_alpha
+                )
+                # NOTE: need to send the already configured ID to the webpage rather than get from the client
+                print(f"ROBOT params sent: {ob.to_dict()}")
+                id = self._send_socket("shape", robob)
+
+                while not int(self._send_socket("shape_mounted", [id, len(robob)])):
+                    time.sleep(0.1)
 
     def add(self, ob, robot_alpha=1.0, collision_alpha=0.0, readonly=False):
         """

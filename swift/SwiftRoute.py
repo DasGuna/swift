@@ -58,6 +58,7 @@ def start_servers(
     outq: Queue,
     inq: Queue,
     stop_servers,
+    connected_check,
     open_tab: bool = True,
     browser: Union[str, None] = None,
     comms: L["websocket", "rtc"] = "websocket",
@@ -85,6 +86,7 @@ def start_servers(
                 outq,
                 inq,
                 stop_servers,
+                connected_check,
             ),
             daemon=True,
         )
@@ -280,9 +282,10 @@ class SwiftRtc:
 
 
 class SwiftSocket:
-    def __init__(self, outq, inq, run):
+    def __init__(self, outq, inq, run, connected):
         self.pcs = set()
         self.run = run
+        self.connected = connected
         self.outq = outq
         self.inq = inq
         self.USERS = set()
@@ -294,19 +297,35 @@ class SwiftSocket:
         port = 53000
         while not started and port < 62000:
             try:
+                print(f"Starting Swift Socket... | connected: {self.connected}")
                 start_server = websockets.serve(self.serve, "localhost", port)
+                print(f"Started Swift Socket!")
                 self.loop.run_until_complete(start_server)
                 started = True
+                print(f"Started Set => {started}")
             except OSError:
                 port += 1
 
         self.inq.put(port)
         self.loop.run_forever()
 
+    # -- Get Methods
+    def _get_users(self):
+        return self.USERS
+
+    def _client_connected(self):
+        if len(self.USERS) > 0:
+            return True
+        else:
+            return False
+
     async def register(self, websocket):
+        print(f"Here in register...")
+        self.connected(True)
         self.USERS.add(websocket)
 
     async def serve(self, websocket, path):
+        print(f"Serve Start...")
         # Initial connection handshake
         await self.register(websocket)
         recieved = await websocket.recv()
@@ -314,11 +333,15 @@ class SwiftSocket:
 
         # Now onto send, recieve cycle
         while self.run():
+            # Get data from Swift through producer method
             message = await self.producer()
             expected = message[0]
             msg = message[1]
             await websocket.send(json.dumps(msg))
             await self.expect_message(websocket, expected)
+
+        print(f"END OF Serve")
+        self.connected = False
         return
 
     async def expect_message(self, websocket, expected):
@@ -327,6 +350,8 @@ class SwiftSocket:
             self.inq.put(recieved)
 
     async def producer(self):
+        """Producer method that gets data from queue (as provided by Swift)
+        """
         data = self.outq.get()
         return data
 
