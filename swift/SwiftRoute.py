@@ -58,7 +58,8 @@ def start_servers(
     outq: Queue,
     inq: Queue,
     stop_servers,
-    connected_check,
+    socket_status,
+    test,
     open_tab: bool = True,
     browser: Union[str, None] = None,
     comms: L["websocket", "rtc"] = "websocket",
@@ -80,13 +81,15 @@ def start_servers(
         socket_port = 1 if COLAB else 0
     else:
         # Start our websocket server with a new port
+        # NOTE: stop_servers method used to terminate socket via run method internally
+        # NOTE: connected_check method used to update connection status internally
         socket = Thread(
             target=SwiftSocket,
             args=(
                 outq,
                 inq,
                 stop_servers,
-                connected_check,
+                socket_status,
             ),
             daemon=True,
         )
@@ -94,6 +97,7 @@ def start_servers(
         socket_port = inq.get()
 
     # Start a http server
+    # This is the static page that acts as a 'client' to the websocket
     server = Thread(
         target=SwiftServer,
         args=(
@@ -165,13 +169,22 @@ def start_servers(
         # Send the answer to the HTTP server
         outq.put(offer_python)
     else:
+        test_thread = Thread(target=test, daemon=True)
+        test_thread.start()
+        # This section here is currently blocking and waits for the webpage to be accessible
+        # NOTE: possibly have this in a waiting thread to terminate upon connection
         try:
-            inq.get(timeout=20)
+            print(f"Check for web page access...")
+            # NOTE: returns a string 'Connected' if successful
+            #       raises Empty if not successful
+            ret = inq.get(timeout=20)
+            print(f"Found! -> {ret} | type of return val: {type(ret)}")
         except Empty:
             print("\nCould not connect to the Swift simulator \n")
             raise
+        # pass
 
-    return socket, server
+    return socket, server, test_thread
 
 
 class SwiftRtc:
@@ -283,6 +296,7 @@ class SwiftRtc:
 
 class SwiftSocket:
     def __init__(self, outq, inq, run, connected):
+        # Set class variables/methods
         self.pcs = set()
         self.run = run
         self.connected = connected
@@ -292,20 +306,20 @@ class SwiftSocket:
         self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.loop)
 
+        # Attempt websocket serve to available port within range
         started = False
-
         port = 53000
         while not started and port < 62000:
             try:
-                print(f"Starting Swift Socket... | connected: {self.connected}")
+                print(f"Starting Swift Socket...")
                 start_server = websockets.serve(self.serve, "localhost", port)
                 print(f"Started Swift Socket!")
                 self.loop.run_until_complete(start_server)
                 started = True
-                print(f"Started Set => {started}")
             except OSError:
                 port += 1
 
+        # Output the connected port via queue
         self.inq.put(port)
         self.loop.run_forever()
 
@@ -319,18 +333,22 @@ class SwiftSocket:
         else:
             return False
 
-    async def register(self, websocket):
-        print(f"Here in register...")
-        self.connected(True)
-        self.USERS.add(websocket)
-
     async def serve(self, websocket, path):
+        """The main server method
+
+        :param websocket: _description_
+        :type websocket: _type_
+        :param path: _description_
+        :type path: _type_
+        """
         print(f"Serve Start...")
-        # Initial connection handshake
+        # Initial connection handshake to available client
         await self.register(websocket)
         recieved = await websocket.recv()
+        print(f"WS Server: received: {recieved}")
+        # Send back connected status on successfull connection to client (static page)
         self.inq.put(recieved)
-
+        
         # Now onto send, recieve cycle
         while self.run():
             # Get data from Swift through producer method
@@ -340,10 +358,12 @@ class SwiftSocket:
             await websocket.send(json.dumps(msg))
             await self.expect_message(websocket, expected)
 
+        # This is currently not reached...
         print(f"END OF Serve")
         self.connected = False
         return
 
+    # --- Data in and out methods
     async def expect_message(self, websocket, expected):
         if expected:
             recieved = await websocket.recv()
@@ -354,6 +374,17 @@ class SwiftSocket:
         """
         data = self.outq.get()
         return data
+    
+    # --- Additional websocket methods
+    async def register(self, websocket):
+        """Registration method (connection status and websocket handler)
+
+        :param websocket: _description_
+        :type websocket: _type_
+        """
+        self.connected(True)
+        self.USERS.add(websocket)
+    
 
 
 class SwiftServer:
@@ -362,6 +393,7 @@ class SwiftServer:
         self.inq = inq
         self.run = run
 
+        # Get the root directory of the built static page
         root_dir = Path(sw.__file__).parent / "out"
 
         class MyHttpRequestHandler(http.server.SimpleHTTPRequestHandler):

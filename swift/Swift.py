@@ -8,12 +8,24 @@ import numpy as np
 import spatialmath as sm
 from spatialgeometry import Shape
 import time
-from queue import Queue
+from queue import Queue, Empty
 import json
 from swift import start_servers, SwiftElement, Button
 from swift.phys import step_v, step_shape
 from typing import Union
 from typing_extensions import Literal as L
+from dataclasses import dataclass
+
+
+@dataclass
+class SwiftObject:
+    obj: any = None # type: ignore
+    in_sim: bool = False
+    in_vis: bool = False
+    is_splat: bool = False
+    robot_alpha: float = 0.0
+    collision_alpha: float = 0.0
+    readonly: int = 0
 
 
 rtb = None
@@ -28,6 +40,8 @@ def _import_rtb():  # pragma nocover
     except ImportError:
         print("\nYou must install the python package roboticstoolbox-python\n")
         raise
+
+
 
 
 class Swift:
@@ -75,6 +89,8 @@ class Swift:
 
         # This holds all simulated objects within swift
         self.swift_objects = []
+        # NEW dictionary of swift objects based on id 
+        self.swift_dict = {}
 
         # This is an option dict with the format id: {option: option_value}
         # to hold custom options for simulated objects
@@ -178,29 +194,73 @@ class Swift:
 
             # A flag for our threads to monitor for when to quit
             self._run_thread = True
-            self.socket, self.server = start_servers(
+            # NOTE: older method from SwiftRoute
+            # self.socket, self.server, self.test_thread = start_servers(
+            #     outq=self.outq,
+            #     inq=self.inq,
+            #     stop_servers=self._servers_running,
+            #     socket_status=self._socket_status,
+            #     test=self._test_thread,
+            #     browser=browser,
+            #     comms=self._comms,
+            #     open_tab=self.open_tab
+            # )
+            # NOTE: new method from SwiftSocket
+            self.socket, self.server, self.test_thread = start_servers(
                 outq=self.outq,
                 inq=self.inq,
                 stop_servers=self._servers_running,
-                connected_check=self._connected_check,
-                browser=browser,
-                comms=self._comms,
-                open_tab=self.open_tab
+                socket_status=self._socket_status,
+                socket_manager=self._socket_manager,
             )
             self.last_time = time.time()
 
-    def _connected_check(self, check: bool):
+    def _socket_manager(self):
+        # This connected class variable is updated from the socket thread on successful connection
+        # While this is false, we want to do the following:
+        # - Get the connected status on a consist poll. The current implementation blocks for this when the socket thread has been created.
+        # - On connection, we would want to upload any added objects (this is currently handled within one add method currently)
+        # - End this thread by reaching end of scope. Ideally we re-run this in the event another connection is needed. 
+        #   In these cases we would want to check if any existing objects have already been added or not
+        while self._connected is False:
+            time.sleep(0.1)
+        
+        # Clear queue on initial connection (will send back a connected from client)
+        ret = self.inq.get()
+        # Socket connection made!
+        print(f"SWIFT: SOCKET MANAGER -> SOCKET CONNECTION IS: {self._connected} | {ret}")
+        # Iterate through existing objects and handle updating while connected
+        # TODO: handle removal of objects in thread
+        while self._connected:
+            for idx, (key, value) in enumerate(self.swift_dict.items()):
+                # print(f"Available object: {value.obj} | check if added: {value.in_vis}")
+                # if the object is not yet in the visualisation, serve and track
+                if not value.in_vis:
+                    print(f"SWIFT: SOCKET MANAGER -> {value} has not been added yet. Adding...")
+                    self.serve_object(value)
+                    value.in_vis = True
+
+                # TODO: add mechanism to remove if required
+            
+            time.sleep(0.1)
+        
+        print(f"SWIFT: SOCKET MANAGER -> End of Thread Reached")
+
+    def _socket_status(self, check: bool):
         self._connected = check 
         
     def _servers_running(self):
         return self._run_thread
 
     def _stop_threads(self):
+        print(f"SWIFT: stopping threads...")
         self._run_thread = False
         if not self.headless:
             self.socket.join(1)
         if not self._dev:
             self.server.join(1)
+
+        self.test_thread.join(1)
 
     def step(self, dt=0.05, render=True):
         """
@@ -233,19 +293,19 @@ class Swift:
         for i, obj in enumerate(self.swift_objects):
             if isinstance(obj, Shape):
                 self._step_shape(obj, dt)
+                obj._propogate_scene_tree()
             elif isinstance(obj, rtb.Robot):
                 self._step_robot(obj, dt, self.swift_options[i]["readonly"])
-
+                obj._propogate_scene_tree()
         # Update world transform of objects
-        for obj in self.swift_objects:
-            obj._propogate_scene_tree()
+        # for obj in self.swift_objects:
+            # obj._propogate_scene_tree()
 
         # Adjust sim time
         self.sim_time += dt
 
         print(f"RUNNING => sim_time: {self.sim_time} | Connected: {self._connected}")
-
-        if not self.headless:
+        if not self.headless and self._connected:
 
             if render and self.rendering:
 
@@ -267,8 +327,10 @@ class Swift:
 
                 self._laststep = time.time()
 
+                # NOTE: does need connection to the socket
                 self._step_elements()
 
+                # NOTE: does need connection to the socket
                 events = self._draw_all()
                 # print(events)
 
@@ -332,65 +394,141 @@ class Swift:
         self._send_socket("close", "0", False)
         self._stop_threads()
 
+    # -- NEW METHODS
     #
     #  Methods to interface with the robots created in other environemnts
     #
-    def serve_objects(self):
+    def serve_object(self, swift_object: SwiftObject = None):
         """Serve objects to a connected client 
         """
         # Iterate through existing swift objects 
         # If connected, serve to client webpage (for visual display)
-        if not self._connected:
+        if not self._connected or swift_object is None:
             return
 
-        for obj in self.swift_objects:
+        print(f"SWIFT: attempting add SwiftObject -> {swift_object}")
+        if isinstance(swift_object.obj, Shape):
+            swift_object.obj._propogate_scene_tree()
+            # NOTE: need to send the already configured ID to the webpage rather than get from the client
+            print(f"SHAPE params sent: {swift_object.obj.to_dict()}")
+            id = int(self._send_socket("shape", [swift_object.obj.to_dict()]))
 
-            if isinstance(ob, Shape):
-                # ob._propogate_scene_tree()
-                # ob._added_to_swift = True
-                # print(f"params sent: {ob.to_dict()}")
-                # NOTE: need to send the already configured ID to the webpage rather than get from the client
-                print(f"SHAPE params sent: {ob.to_dict()}")
-                id = int(self._send_socket("shape", [ob.to_dict()]))
+            while not int(self._send_socket("shape_mounted", [id, 1])):
+                time.sleep(0.1)
+        elif isinstance(swift_object.obj, SwiftElement):
+            # TODO: this needs testing
+            # NOTE: need to send the already configured ID to the webpage rather than get from the client
+            print(f"ELEMENT params sent: {swift_object.obj.to_dict()}")
+            self._send_socket("element", swift_object.obj.to_dict())
+        elif isinstance(swift_object.obj, rtb.Robot):
+            # Update robot transforms
+            swift_object.obj._update_link_tf()
+            swift_object.obj._propogate_scene_tree()
+            # Update robot qlim
+            swift_object.obj._qlim = swift_object.obj.qlim
+            # Prepare object with expected alpha data
+            robob = swift_object.obj._to_dict(
+                robot_alpha=swift_object.robot_alpha, collision_alpha=swift_object.collision_alpha
+            )
+            # NOTE: need to send the already configured ID to the webpage rather than get from the client
+            print(f"ROBOT params sent: {swift_object.obj._to_dict()}")
+            id = self._send_socket("shape", robob)
 
-                while not int(self._send_socket("shape_mounted", [id, 1])):
-                    time.sleep(0.1)
-            elif isinstance(ob, SwiftElement):
+            while not int(self._send_socket("shape_mounted", [id, len(robob)])):
+                time.sleep(0.1)
+        elif swift_object.is_splat:
+            id = int(self._send_socket("shape", [swift_object.obj]))
+        else:
+            # Nothing to do
+            pass
 
-                # if ob._added_to_swift:
-                #     raise ValueError("This element has already been added to Swift")
-                #
-                # ob._added_to_swift = True
-                #
-                # id = 'customelement' + str(self.elementid)
-                # id = self.elementid
-                # self.elementid += 1
-                # self.elements[str(id)] = ob
-                # ob._id = id
-                #
-                # NOTE: need to send the already configured ID to the webpage rather than get from the client
-                print(f"ELEMENT params sent: {ob.to_dict()}")
-                self._send_socket("element", ob.to_dict())
-            elif isinstance(ob, rtb.Robot):
+    # TODO: rename once finalised
+    def new_add(self, ob, robot_alpha=1.0, collision_alpha=0.0, readonly=False):
+        """Addition method that is agnostic of socket connection
 
-                # # Update robot transforms
-                # ob._update_link_tf()
-                # ob._propogate_scene_tree()
-                #
-                # # Update robot qlim
-                # ob._qlim = ob.qlim
-                #
-                # if not self.headless:
-                print(f"Here adding robot object...{self._connected}")
-                robob = ob._to_dict(
-                    robot_alpha=robot_alpha, collision_alpha=collision_alpha
+        :param ob: _description_
+        :type ob: _type_
+        :param robot_alpha: _description_, defaults to 1.0
+        :type robot_alpha: float, optional
+        :param collision_alpha: _description_, defaults to 0.0
+        :type collision_alpha: float, optional
+        :param readonly: _description_, defaults to False
+        :type readonly: bool, optional
+        :return: _description_
+        :rtype: _type_
+        """
+        print(f"SWIFT: entrypoint to new add method")
+        if isinstance(ob, Shape):
+            ob._propogate_scene_tree()
+            # Check if shape has already been added 
+            if ob._added_to_swift:
+                print(f"SWIFT: {ob} [SHAPE] already in graphcial interface")
+                return -1
+            else:
+                # Indicate addition to simulator (not necessarily graphical interface)
+                ob._added_to_swift = True
+                id = len(self.swift_objects)
+                self.swift_objects.append(ob)
+                # Update swift object dictionary
+                self.swift_dict[int(id)] = SwiftObject(obj=ob, in_sim=True)
+                return int(id)
+        elif isinstance(ob, SwiftElement):
+            # NOTE: This section should be set true when successfully added to client (upon connection)
+            # TODO: Move this to server side add method (when ready)
+            if ob._added_to_swift:
+                print(f"SWIFT: {ob} [SWIFT ELEMENT] already in graphcial interface")
+                return -2
+            else:
+                # Indicate addition to simulator (not necessarily graphical interface)
+                ob._added_to_swift = True
+                id = self.elementid
+                self.elementid += 1
+                self.elements[str(id)] = ob
+                ob._id = id
+                # Update swift object dictionary
+                self.swift_dict[int(id)] = SwiftObject(obj=ob, in_sim=True)
+                return int(id)
+        elif isinstance(ob, rtb.Robot):
+            # Update robot transforms
+            ob._update_link_tf()
+            ob._propogate_scene_tree()
+            # Update robot qlim
+            ob._qlim = ob.qlim
+            # Update id based on list of objects
+            id = len(self.swift_objects)
+            self.swift_objects.append(ob)
+
+            # Update swift object dictionary
+            self.swift_dict[int(id)] = SwiftObject(
+                obj=ob, 
+                in_sim=True, 
+                robot_alpha=robot_alpha, 
+                collision_alpha=collision_alpha, 
+                readonly=readonly
+            )
+
+            # TODO: update for use with new dictionary
+            self.swift_options[int(id)] = {
+                "robot_alpha": robot_alpha,
+                "collision_alpha": collision_alpha,
+                "readonly": readonly,
+            }
+
+            return int(id)
+        else:
+            # Currently only handling splat cases (passed in as a dict of params)
+            # TODO: improve this
+            if isinstance(ob, dict) and ob['stype'] == 'splat':
+                self.swift_objects.append(ob)
+                id = len(self.swift_objects)
+                self.swift_dict[int(id)] = SwiftObject(
+                    obj=ob,
+                    in_sim=True,
+                    is_splat=True
                 )
-                # NOTE: need to send the already configured ID to the webpage rather than get from the client
-                print(f"ROBOT params sent: {ob.to_dict()}")
-                id = self._send_socket("shape", robob)
-
-                while not int(self._send_socket("shape_mounted", [id, len(robob)])):
-                    time.sleep(0.1)
+                return int(id)
+            else:
+                return -3
 
     def add(self, ob, robot_alpha=1.0, collision_alpha=0.0, readonly=False):
         """
@@ -423,11 +561,18 @@ class Swift:
         # id = add(robot) adds the robot to the external environment. robot
         # must be of an appropriate class. This adds a robot object to a
         # list of robots which will act upon the step() method being called.
-
+        # NOTE: addition here (if socket is not open, will mean the object is never added)
+        #       future implementation should attempt to add, append (as currently) and attempt
+        #       a re-addition upon connection. A possible way to segregate these is to have
+        #       the higher level add (this method) simply perform the 'non-headless' function
+        #       with a separate add method to update the client (once connected) with 'added' objects
         if isinstance(ob, Shape):
             ob._propogate_scene_tree()
+            # NOTE: This method should be set true when successfully added to client (upon connection)
+            # TODO: Move this to server side add method (when ready)
             ob._added_to_swift = True
             print(f"params sent: {ob.to_dict()}")
+            # NOTE: this section to be moved to socket side addition method
             if not self.headless:
                 id = int(self._send_socket("shape", [ob.to_dict()]))
 
@@ -441,9 +586,10 @@ class Swift:
             return int(id)
         elif isinstance(ob, SwiftElement):
 
+            # NOTE: This section should be set true when successfully added to client (upon connection)
+            # TODO: Move this to server side add method (when ready)
             if ob._added_to_swift:
                 raise ValueError("This element has already been added to Swift")
-
             ob._added_to_swift = True
 
             # id = 'customelement' + str(self.elementid)
@@ -452,6 +598,7 @@ class Swift:
             self.elements[str(id)] = ob
             ob._id = id
 
+            # NOTE: this section to be moved to socket side addition method
             self._send_socket("element", ob.to_dict())
         elif isinstance(ob, rtb.Robot):
 
@@ -468,7 +615,10 @@ class Swift:
 
             # Update robot qlim
             ob._qlim = ob.qlim
+            
+            print(f"SWIFT: adding robot...")
 
+            # NOTE: this section to be moved to socket side addition method
             if not self.headless:
                 robob = ob._to_dict(
                     robot_alpha=robot_alpha, collision_alpha=collision_alpha
@@ -667,6 +817,7 @@ class Swift:
 
         self._send_socket("camera_pose", transform, False)
 
+    # NOTE: does not need connection to the socket
     def _step_robot(self, robot, dt, readonly):
 
         # robot._set_link_fk(robot.q)
@@ -700,6 +851,7 @@ class Swift:
         # Update the robot link transofrms based on the new q
         robot._update_link_tf()
 
+    # NOTE: does need connection to the socket
     def _step_shape(self, shape, dt):
 
         if shape._changed:
@@ -715,7 +867,7 @@ class Swift:
 
         # shape._sT[:] = shape._wT @ shape._base
         # shape._sq[:] = sm.base.r2q(shape._sT[:3, :3], order="xyzs")
-
+ 
     def _step_elements(self):
         """
         Check custom HTML elements to see if any have been updated, if there
@@ -757,11 +909,19 @@ class Swift:
 
     def _send_socket(self, code, data=None, expected=True):
         msg = [expected, [code, data]]
-
+        # print(f"SWIFT: sending to socket: {msg} | format: [expected, [code, data]]")
         self.outq.put(msg)
 
         if expected:
-            return self.inq.get()
+            ret = "0"
+            try:
+                ret = self.inq.get(block=True)
+                # print(f"SWIFT: send socket return val: {ret}")
+            except Empty:
+                print(f"SWIFT: cannot connect to client")
+                pass
+
+            return ret
         else:
             return "0"
 
