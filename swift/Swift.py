@@ -1,8 +1,9 @@
 #!/usr/bin/env python
 """
-@author Jesse Haviland
+@author Jesse Haviland (original)
+@author Dasun Gunasinghe (modifications)
 """
-
+# --- IMPORTS
 from os import read
 import numpy as np
 import spatialmath as sm
@@ -16,21 +17,8 @@ from typing import Union
 from typing_extensions import Literal as L
 from dataclasses import dataclass
 
-
-@dataclass
-class SwiftObject:
-    obj: any = None # type: ignore
-    in_sim: bool = False
-    in_vis: bool = False
-    is_splat: bool = False
-    robot_alpha: float = 0.0
-    collision_alpha: float = 0.0
-    readonly: int = 0
-
-
+# --- ADDITIONAL SETUP
 rtb = None
-
-
 def _import_rtb():  # pragma nocover
     import importlib
 
@@ -41,8 +29,16 @@ def _import_rtb():  # pragma nocover
         print("\nYou must install the python package roboticstoolbox-python\n")
         raise
 
-
-
+# --- CLASSES
+@dataclass
+class SwiftObject:
+    obj: any = None # type: ignore
+    in_sim: bool = False
+    in_vis: bool = False
+    is_splat: bool = False
+    robot_alpha: float = 0.0
+    collision_alpha: float = 0.0
+    readonly: int = 0
 
 class Swift:
     """
@@ -89,7 +85,11 @@ class Swift:
 
         # This holds all simulated objects within swift
         self.swift_objects = []
+
         # NEW dictionary of swift objects based on id 
+        # TODO: this should be one dictionary to track added/removed objects
+        #       over a list as well as options. A data structure to contain all
+        #       information (to be tracked in a dictionary) is to be finalised
         self.swift_dict = {}
 
         # This is an option dict with the format id: {option: option_value}
@@ -104,6 +104,11 @@ class Swift:
 
         # Element dict which holds the callback functions for form updates
         self.elements = {}
+
+        # Members as placeholders for threads (if needed and created)
+        self.socket_server = None
+        self.page_client = None
+        self.socket_manager = None
 
         self.headless = False
         self.rendering = True
@@ -131,7 +136,6 @@ class Swift:
     #
     #  Basic methods to do with the state of the external program
     #
-
     def launch(
         self,
         realtime: bool = False,
@@ -206,7 +210,7 @@ class Swift:
             #     open_tab=self.open_tab
             # )
             # NOTE: new method from SwiftSocket
-            self.socket, self.server, self.test_thread = start_servers(
+            self.socket_server, self.page_client, self.socket_manager = start_servers(
                 outq=self.outq,
                 inq=self.inq,
                 stop_servers=self._servers_running,
@@ -255,12 +259,17 @@ class Swift:
     def _stop_threads(self):
         print(f"SWIFT: stopping threads...")
         self._run_thread = False
-        if not self.headless:
-            self.socket.join(1)
-        if not self._dev:
-            self.server.join(1)
-
-        self.test_thread.join(1)
+        # if not self.headless:
+        if self.socket_server is not None and self.socket_server.is_alive():
+            print(f"SWIFT: stopping {self.socket_server.name}")
+            self.socket_server.join(1)
+        # if not self._dev:
+        if self.page_client is not None and self.page_client.is_alive():
+            print(f"SWIFT: stopping {self.page_client.name}")
+            self.page_client.join(1)
+        if self.socket_manager is not None and self.socket_manager.is_alive():
+            print(f"SWIFT: stopping {self.socket_manager.name}")
+            self.socket_manager.join(1)
 
     def step(self, dt=0.05, render=True):
         """

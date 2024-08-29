@@ -1,5 +1,5 @@
 # from swift.SwiftRoute import SwiftServer, SwiftSocket, start_servers
-from swift.SwiftSocket import SwiftServer, SwiftSocket, start_servers
+from swift.SwiftWebSocket import SwiftServer, SwiftSocket, start_servers
 from swift.SwiftElement import (
     SwiftElement,
     Slider,

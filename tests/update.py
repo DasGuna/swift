@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 import roboticstoolbox as rtb 
 import spatialmath as sm 
 import spatialgeometry as sg

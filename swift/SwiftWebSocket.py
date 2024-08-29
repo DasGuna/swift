@@ -28,7 +28,7 @@ class SwiftSocket:
         self.inq = inq
         self.USERS = set()
         self.loop = asyncio.new_event_loop()
-        self.name = "WEBSOCKET"
+        self.name = "SWIFT SOCKET"
         asyncio.set_event_loop(self.loop)
 
         # Attempt websocket serve to available port within range
@@ -36,15 +36,15 @@ class SwiftSocket:
         port = 53000
         while not started and port < 62000:
             try:
-                print(f"Starting Swift Socket...")
+                print(f"{self.name}: Starting Socket...")
                 start_server = websockets.serve(self.serve, "localhost", port)
-                print(f"Started Swift Socket!")
+                print(f"{self.name}: Started Socket!")
                 self.loop.run_until_complete(start_server)
                 started = True
             except OSError:
                 port += 1
 
-        # Output the connected port via queue
+        # Output the connected port via queue on completion
         self.inq.put(port)
         self.loop.run_forever()
 
@@ -58,26 +58,31 @@ class SwiftSocket:
         :param path: _description_
         :type path: _type_
         """
-        print(f"{self.name}: Serve Start...")
+        print(f"{self.name}: Socket Initialising...")
         # Initial connection handshake to available client
+        # Store client as a set (non-duplicates)
         await self.register(websocket)
         recieved = await websocket.recv()
-        print(f"{self.name} received: {recieved}")
         # Send back connected status on successfull connection to client (static page)
         self.inq.put(recieved)
         
         # Now onto send, recieve cycle
+        print(f"{self.name}: Socket Running...")
         while self.run():
             # Get data from Swift through producer method
             message = await self.producer()
             expected = message[0]
             msg = message[1]
+            # Send data to client
             await websocket.send(json.dumps(msg))
+            # Receive any responses (based on expected or not)
             await self.expect_message(websocket, expected)
 
-        # This is currently not reached...
-        print(f"{self.name}: END OF Serve")
+        # Termination requested (updated through self.run())
+        print(f"{self.name}: Socket Terminating...")
+        # Add any other cleanup activites (if required)
         self.connected = False
+        print(f"{self.name}: Socket Terminated")
         return
 
     # --- Data in and out methods
@@ -89,6 +94,7 @@ class SwiftSocket:
         :param expected: _description_
         :type expected: _type_
         """
+        # Update swift with any received data that was expected
         if expected:
             recieved = await websocket.recv()
             self.inq.put(recieved)
@@ -99,6 +105,7 @@ class SwiftSocket:
         :return: _description_
         :rtype: _type_
         """
+        # Get data from Swift if available
         data = self.outq.get()
         return data
     
@@ -109,10 +116,10 @@ class SwiftSocket:
         :param websocket: _description_
         :type websocket: _type_
         """
+        # Set the connected member variable in Swift for monitoring connection to the socket
         self.connected(True)
+        # Update the tracking of client users 
         self.USERS.add(websocket)
-
-
 
 class SwiftServer:
     """Main Swift Page Serving Class
@@ -227,7 +234,6 @@ class SwiftServer:
 # Removal of RTC (temporarily) 
 # Addition of a socket connection checking thread
 def start_servers(outq: Queue, inq: Queue, stop_servers, socket_status, socket_manager):
-    print(f"SOCKET INIT: HERE")
     # Start the websocket handler with a new port
     # NOTE: stop_servers method used to terminate socket via run method internally
     # NOTE: connected_check method used to update connection status internally
@@ -241,6 +247,8 @@ def start_servers(outq: Queue, inq: Queue, stop_servers, socket_status, socket_m
         ),
         daemon=True,
     )
+    # Name for identification
+    socket.name = "Thread-Socket-Server" 
     # Start the socket thread
     socket.start()
     # Get the port (first output from socket initialisation)
@@ -258,12 +266,16 @@ def start_servers(outq: Queue, inq: Queue, stop_servers, socket_status, socket_m
         ),
         daemon=True,
     )
+    # Name for identification
+    server.name = "Thread-Page-Client" 
     server.start()
     server_port = inq.get()
-    print(f"SOCKET INIT: Available at => http://localhost:{server_port}/?{socket_port}") 
+    print(f"SOCKET SETUP: Available at => http://localhost:{server_port}/?{socket_port}") 
 
     # Start a connection checking thread (for headless implementation)
     manager = Thread(target=socket_manager, daemon=True)
+    # Name for identification
+    manager.name = "Thread-Socket-Manager" 
     manager.start()
 
     # Return thread handlers to higher-level caller for thread termination
