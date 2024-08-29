@@ -211,6 +211,7 @@ class Swift:
             #     open_tab=self.open_tab
             # )
             # NOTE: new method from SwiftSocket
+            print(f"SWIFT: Setting up Socket...")
             self.socket_server, self.page_client, self.socket_manager = start_servers(
                 outq=self.outq,
                 inq=self.inq,
@@ -282,6 +283,17 @@ class Swift:
             print(f"SWIFT: stopping {self.socket_manager.name}")
             self.socket_manager.join(1)
 
+    def objects_loaded(self) -> bool:
+        count = 0
+        for key in self.swift_dict.keys():
+            if self.swift_dict[key].in_vis:
+                count+=1
+        
+        if count == len(self.swift_dict):
+            return True
+        else:
+            return False
+
     def step(self, dt=0.05, render=True):
         """
         Update the graphical scene
@@ -323,8 +335,9 @@ class Swift:
         # Adjust sim time
         self.sim_time += dt
 
-        print(f"RUNNING => sim_time: {self.sim_time} | Connected: {self._vis_running}")
-        if not self.headless and self._vis_running:
+        # print(f"RUNNING => sim_time: {self.sim_time} | Connected: {self._vis_running}")
+        # NOTE: only run if not headless and the visualiser is successfully launched and all objects have been served
+        if not self.headless and self._vis_running and self.objects_loaded():
 
             if render and self.rendering:
 
