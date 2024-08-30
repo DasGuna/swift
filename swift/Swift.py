@@ -4,6 +4,7 @@
 @author Dasun Gunasinghe (modifications)
 """
 # --- IMPORTS
+import copy
 from os import read
 import numpy as np
 import spatialmath as sm
@@ -16,6 +17,7 @@ from swift.phys import step_v, step_shape
 from typing import Union
 from typing_extensions import Literal as L
 from dataclasses import dataclass
+from threading import Thread, Lock
 
 # --- ADDITIONAL SETUP
 rtb = None
@@ -31,8 +33,8 @@ def _import_rtb():  # pragma nocover
 
 # --- CLASSES
 @dataclass
-class SwiftObject:
-    obj: any = None # type: ignore
+class SwiftData:
+    object: any = None # type: ignore
     remove_req: bool = False
     in_sim: bool = False
     in_vis: bool = False
@@ -40,6 +42,7 @@ class SwiftObject:
     robot_alpha: float = 0.0
     collision_alpha: float = 0.0
     readonly: int = 0
+    vis_id: int = 0
 
 class Swift:
     """
@@ -106,10 +109,14 @@ class Swift:
         # Element dict which holds the callback functions for form updates
         self.elements = {}
 
+        # -- Thread variables
         # Members as placeholders for threads (if needed and created)
         self.socket_server = None
         self.page_client = None
         self.socket_manager = None
+        # Lock
+        self.lock = Lock()
+
 
         self.headless = False
         self.rendering = True
@@ -228,54 +235,101 @@ class Swift:
         # - On connection, we would want to upload any added objects (this is currently handled within one add method currently)
         # - End this thread by reaching end of scope. Ideally we re-run this in the event another connection is needed. 
         #   In these cases we would want to check if any existing objects have already been added or not
-        if not self._vis_running:
+
+        # Acquire the shared visualiser running flag 
+        self.lock.acquire()
+        _vis_running = self._vis_running
+        self.lock.release()
+
+        # Confirm if running or not to validate connection
+        if not _vis_running:
             print(f"SWIFT: SOCKET MANAGER -> ESTABLISHING NEW SOCKET...")
-            while self._vis_running is False:
+
+            # Wait for connection to establish correctly
+            while True:
+                self.lock.acquire()
+                _vis_running = self._vis_running
+                self.lock.release()
+                
+                if _vis_running is False:
+                    break
                 time.sleep(0.1)
             
             # Clear queue on initial connection (will send back a connected from client)
-            ret = self.inq.get()
+            self.inq.get()
         else:
             print(f"SWIFT: SOCKET MANAGER -> SOCKET CONNECTION ALREADY ESTABLISHED")
 
         # Socket connection made!
         print(f"SWIFT: SOCKET MANAGER -> SOCKET CONNECTION IS: {self._vis_running}")
+        
         # Iterate through existing objects and handle updating while connected
         # TODO: handle removal of objects in thread
-        while self._vis_running:
-            for idx, (key, value) in enumerate(self.swift_dict.items()):
-                # print(f"Available object: {value.obj} | check if added: {value.in_vis}")
-                # if the object is not yet in the visualisation, serve and track
-                if not value.in_vis:
-                    print(f"SWIFT: SOCKET MANAGER -> {value} has not been added yet. Adding...")
-                    self.serve_object(value)
-                    value.in_vis = True
+        while True:
+            # Exit condition based on checking main swift visualiser running member
+            self.lock.acquire()
+            _vis_running = self._vis_running
+            _swift_dict = self.swift_dict
+            self.lock.release()
 
-                # TODO: add mechanism to remove if required
-                if value.remove_req:
-                    pass
+            if not _vis_running:
+                break
+
+            # Handle race conditions on user update (via remove call)
+            removal_key_list = []
+            for key in _swift_dict.keys():
+                # If the object is not yet in the visualisation, serve and track
+                if not _swift_dict[key].in_vis:
+                    self.visualiser_add_object(_swift_dict[key])
+                    _swift_dict[key].in_vis = True
+
+                # If the object is flagged for removal, remove from client
+                if _swift_dict[key].remove_req:
+                    # remove the object from the simulator
+                    self.visualiser_remove_object(_swift_dict[key])
+                    # remove the object from the swift dictionary data
+                    removal_key_list.append(key)
 
                 # TODO: update state (from visualiser input)
                 # Implement a get shape poses method here for updating object state
             
+            # Remove from swift dict
+            for key in removal_key_list:
+                del _swift_dict[key]
+
+            # Update swift dict from local copy
+            self.lock.acquire()
+            self._swift_dict = _swift_dict
+            self.lock.release()
+
             time.sleep(0.1)
         
         print(f"SWIFT: SOCKET MANAGER -> End of Thread Reached")
 
     def _socket_status(self, check: bool):
-        self._vis_running = check 
+        """Thread call to update the visualiser running method
+
+        :param check: _description_
+        :type check: bool
+        """
+        with self.lock:
+            self._vis_running = check 
         
     def _servers_running(self):
-        return self._run_thread
+        """Thread call to return swift's higher-level call to stop function
+
+        :return: _description_
+        :rtype: _type_
+        """
+        with self.lock:
+            return self._run_thread
 
     def _stop_threads(self):
         print(f"SWIFT: stopping threads...")
         self._run_thread = False
-        # if not self.headless:
         if self.socket_server is not None and self.socket_server.is_alive():
             print(f"SWIFT: stopping {self.socket_server.name}")
             self.socket_server.join(1)
-        # if not self._dev:
         if self.page_client is not None and self.page_client.is_alive():
             print(f"SWIFT: stopping {self.page_client.name}")
             self.page_client.join(1)
@@ -321,16 +375,14 @@ class Swift:
         # TODO how is the pose of shapes updated prior to step?
 
         # Update local pose of objects
-        for i, obj in enumerate(self.swift_objects):
-            if isinstance(obj, Shape):
-                self._step_shape(obj, dt)
-                obj._propogate_scene_tree()
-            elif isinstance(obj, rtb.Robot):
-                self._step_robot(obj, dt, self.swift_options[i]["readonly"])
-                obj._propogate_scene_tree()
-        # Update world transform of objects
-        # for obj in self.swift_objects:
-            # obj._propogate_scene_tree()
+        # New implementation with main data dictionary of objects
+        for key in self.swift_dict.keys():
+            if isinstance(self.swift_dict[key].object, Shape):
+                self._step_shape(self.swift_dict[key].object, dt)
+                self.swift_dict[key].object._propogate_scene_tree()
+            elif isinstance(self.swift_dict[key].object, rtb.Robot):
+                self._step_robot(self.swift_dict[key].object, dt, self.swift_dict[key].readonly)
+                self.swift_dict[key].object._propogate_scene_tree()
 
         # Adjust sim time
         self.sim_time += dt
@@ -364,7 +416,6 @@ class Swift:
 
                 # NOTE: does need connection to the socket
                 events = self._draw_all()
-                # print(events)
 
                 # Process GUI events
                 self.process_events(events)
@@ -375,11 +426,6 @@ class Swift:
                 self._laststep = time.time()
                 events = json.loads(self._send_socket("shape_poses", [], True))
                 self.process_events(events)
-
-            # print(events)
-            # else:
-            #     for i in range(len(self.robots)):
-            #         self.robots[i]['ob'].fkine_all(self.robots[i]['ob'].q)
 
             self._send_socket("sim_time", self.sim_time, expected=False)
 
@@ -427,49 +473,68 @@ class Swift:
     #
     #  Methods to interface with the robots created in other environemnts
     #
-    def serve_object(self, swift_object: SwiftObject = None):
+    def visualiser_add_object(self, swift_data: SwiftData = None):
         """Serve objects to a connected client 
         """
-        # Iterate through existing swift objects 
-        # If connected, serve to client webpage (for visual display)
-        if not self._vis_running or swift_object is None:
+        # Handle error on serve (if the visualiser is not running or data is empty)
+        if not self._vis_running or swift_data is None:
             return
 
-        print(f"SWIFT: attempting add SwiftObject -> {swift_object}")
-        if isinstance(swift_object.obj, Shape):
-            swift_object.obj._propogate_scene_tree()
+        # Iterate through existing swift objects 
+        # If connected, serve to client webpage (for visual display)
+        if isinstance(swift_data.object, Shape):
+            swift_data.object._propogate_scene_tree()
             # NOTE: need to send the already configured ID to the webpage rather than get from the client
-            print(f"SHAPE params sent: {swift_object.obj.to_dict()}")
-            id = int(self._send_socket("shape", [swift_object.obj.to_dict()]))
+            id = int(self._send_socket("shape", [swift_data.object.to_dict()]))
 
+            # Wait for mount of object in visualiser
             while not int(self._send_socket("shape_mounted", [id, 1])):
                 time.sleep(0.1)
-        elif isinstance(swift_object.obj, SwiftElement):
+            
+            # Finalise id in object
+            swift_data.object.vis_id = id
+        elif isinstance(swift_data.object, SwiftElement):
             # TODO: this needs testing
             # NOTE: need to send the already configured ID to the webpage rather than get from the client
-            print(f"ELEMENT params sent: {swift_object.obj.to_dict()}")
-            self._send_socket("element", swift_object.obj.to_dict())
-        elif isinstance(swift_object.obj, rtb.Robot):
+            # print(f"ELEMENT params sent: {swift_data.object.to_dict()}")
+            self._send_socket("element", swift_data.object.to_dict())
+        elif isinstance(swift_data.object, rtb.Robot):
             # Update robot transforms
-            swift_object.obj._update_link_tf()
-            swift_object.obj._propogate_scene_tree()
+            swift_data.object._update_link_tf()
+            swift_data.object._propogate_scene_tree()
             # Update robot qlim
-            swift_object.obj._qlim = swift_object.obj.qlim
+            swift_data.object._qlim = swift_data.object.qlim
             # Prepare object with expected alpha data
-            robob = swift_object.obj._to_dict(
-                robot_alpha=swift_object.robot_alpha, collision_alpha=swift_object.collision_alpha
+            robob = swift_data.object._to_dict(
+                robot_alpha=swift_data.robot_alpha, 
+                collision_alpha=swift_data.collision_alpha
             )
             # NOTE: need to send the already configured ID to the webpage rather than get from the client
-            print(f"ROBOT params sent: {swift_object.obj._to_dict()}")
             id = self._send_socket("shape", robob)
 
+            # Wait for mount of object in visualiser
             while not int(self._send_socket("shape_mounted", [id, len(robob)])):
                 time.sleep(0.1)
-        elif swift_object.is_splat:
-            id = int(self._send_socket("shape", [swift_object.obj]))
+
+            # Finalise id in object
+            swift_data.object.vis_id = id
+        elif swift_data.is_splat:
+            # TODO: handle this as an object - currently only the params are sent (which is wrongly set as an 'object')
+            id = int(self._send_socket("shape", [swift_data.object]))
+
+            # Finalise id in object
+            swift_data.object.vis_id = id
         else:
             # Nothing to do
             pass
+    
+    def visualiser_remove_object(self, swift_data: SwiftData = None):
+        # Handle error on remove
+        if swift_data is None:
+            return
+        
+        if isinstance(swift_data.object, rtb.Robot) or isinstance(swift_data.object, Shape):
+            self._send_socket(code="remove",data=swift_data.vis_id)
 
     # TODO: rename once finalised
     def add(self, ob, robot_alpha=1.0, collision_alpha=0.0, readonly=False):
@@ -483,40 +548,33 @@ class Swift:
         :type collision_alpha: float, optional
         :param readonly: _description_, defaults to False
         :type readonly: bool, optional
-        :return: _description_
-        :rtype: _type_
+        :return: configured id (if successful).  
+        :rtype: int > 0 if successful, or < 0 if in error 
         """
-        print(f"SWIFT: entrypoint to new add method")
+        # Testing error case prior to general addition
+        for key in self.swift_dict.keys():
+            if id(ob) == id(self.swift_dict[key].object):
+                print(f"SWIFT: {id(ob)} unique ID already added to captured dictionary {id(self.swift_dict[key].object)}")
+                print(f"SWIFT: Ignoring as object is already in swift...")
+                return -1 
+            
+        # print(f"SWIFT: entrypoint to new add method")
         if isinstance(ob, Shape):
             ob._propogate_scene_tree()
-            # Check if shape has already been added 
-            if ob._added_to_swift:
-                print(f"SWIFT: {ob} [SHAPE] already in graphcial interface")
-                return -1
-            else:
-                # Indicate addition to simulator (not necessarily graphical interface)
-                ob._added_to_swift = True
-                id = len(self.swift_objects)
-                self.swift_objects.append(ob)
-                # Update swift object dictionary
-                self.swift_dict[int(id)] = SwiftObject(obj=ob, in_sim=True)
-                return int(id)
+            # id = len(self.swift_objects)
+            self.swift_objects.append(ob)
+            # Update swift object dictionary
+            swift_id = len(self.swift_dict)
+            self.swift_dict[int(swift_id)] = SwiftData(object=ob, in_sim=True)
+            return int(swift_id)
         elif isinstance(ob, SwiftElement):
-            # NOTE: This section should be set true when successfully added to client (upon connection)
-            # TODO: Move this to server side add method (when ready)
-            if ob._added_to_swift:
-                print(f"SWIFT: {ob} [SWIFT ELEMENT] already in graphcial interface")
-                return -2
-            else:
-                # Indicate addition to simulator (not necessarily graphical interface)
-                ob._added_to_swift = True
-                id = self.elementid
-                self.elementid += 1
-                self.elements[str(id)] = ob
-                ob._id = id
-                # Update swift object dictionary
-                self.swift_dict[int(id)] = SwiftObject(obj=ob, in_sim=True)
-                return int(id)
+            swift_id = self.elementid
+            self.elementid += 1
+            self.elements[str(swift_id)] = ob
+            ob._id = swift_id
+            # Update swift object dictionary
+            self.swift_dict[int(swift_id)] = SwiftData(obj=ob, in_sim=True)
+            return int(swift_id)
         elif isinstance(ob, rtb.Robot):
             # Update robot transforms
             ob._update_link_tf()
@@ -524,42 +582,33 @@ class Swift:
             # Update robot qlim
             ob._qlim = ob.qlim
             # Update id based on list of objects
-            id = len(self.swift_objects)
+            # id = len(self.swift_objects)
             self.swift_objects.append(ob)
 
+            swift_id = len(self.swift_dict)
             # Update swift object dictionary
-            self.swift_dict[int(id)] = SwiftObject(
-                obj=ob, 
+            self.swift_dict[int(swift_id)] = SwiftData(
+                object=ob, 
                 in_sim=True, 
                 robot_alpha=robot_alpha, 
                 collision_alpha=collision_alpha, 
                 readonly=readonly
             )
-
-            # TODO: update for use with new dictionary
-            self.swift_options[int(id)] = {
-                "robot_alpha": robot_alpha,
-                "collision_alpha": collision_alpha,
-                "readonly": readonly,
-            }
-
-            return int(id)
+            return int(swift_id)
         else:
             # Currently only handling splat cases (passed in as a dict of params)
             # TODO: improve this
             if isinstance(ob, dict) and ob['stype'] == 'splat':
-                self.swift_objects.append(ob)
-                id = len(self.swift_objects)
-                self.swift_dict[int(id)] = SwiftObject(
-                    obj=ob,
-                    in_sim=True,
-                    is_splat=True
-                )
+                # self.swift_objects.append(ob)
+                # id = len(self.swift_objects)
+                swift_id = len(self.swift_dict)
+                self.swift_dict[int(swift_id)] = SwiftData(object=ob, in_sim=True, is_splat=True)
                 return int(id)
             else:
-                return -3
+                return -2
 
-    # def add(self, ob, robot_alpha=1.0, collision_alpha=0.0, readonly=False):
+    # KEPT AS LEGACY
+    # def old_add(self, ob, robot_alpha=1.0, collision_alpha=0.0, readonly=False):
     #     """
     #     Add a robot to the graphical scene
 
@@ -670,23 +719,25 @@ class Swift:
 
     #         return int(id)
 
-    # # TEST GS IMPLEMENTATION 
-    # def add_splat(self, params):
-    #     # TODO: validate the path before sending
-    #     # TEMP Creation of dict params to send
-    #     # TODO: add other params, such as position, orientation, etc...
-    #     if not self.headless:
-    #         # Send the shape function command to mount provided splat path
-    #         id = int(self._send_socket("shape", [params]))
+    # TODO: Test and validate solution
+    def new_remove(self, id = None):
+        """Remove a robot/shape from graphical scene and simulator using ID
 
-    #         # TODO: Implement a similar wait as there is some time before it has been added
-    #         # while not int(self._send_socket("shape_mounted", [id, 1])):
-    #             # time.sleep(0.1)
-
-    #     # TODO: Implement a similar member variable to track gs requests
-    #     # NOTE: currently only handles one gs at a time
-    #     # self.swift_objects.append(ob)
-    #     return int(id)
+        :param object: _description_
+        :type object: _type_
+        """
+        # Handle error condition if no id was provided
+        if id is None:
+            return
+        
+        # ID takes precedence in removal (as multiple objects may be of the same type)
+        # Check if the provided ID is in the configured key list for the dictionary of data
+        if id in self.swift_dict.keys():
+            # Request removal from dictionary in running socket thread
+            self.swift_dict[id].remove_req = True
+        else:
+            print(f"SWIFT: No such id in Swift -> {id}")
+            print(f"SWIFT: Current ids -> {self.swift_dict.keys()}")
 
     def remove(self, id):
         """
@@ -913,20 +964,19 @@ class Swift:
 
         msg = []
 
-        for i in range(len(self.swift_objects)):
-            if self.swift_objects[i] is not None:
-                if isinstance(self.swift_objects[i], Shape):
-                    msg.append([i, [self.swift_objects[i].fk_dict()]])
-                elif isinstance(self.swift_objects[i], rtb.Robot):
-                    msg.append(
-                        [
-                            i,
-                            self.swift_objects[i]._fk_dict(
-                                self.swift_options[i]["robot_alpha"],
-                                self.swift_options[i]["collision_alpha"],
-                            ),
-                        ]
-                    )
+        # New method using the dictionary
+        for key in self.swift_dict.keys():
+            if self.swift_dict[key].object is not None:
+                if isinstance(self.swift_dict[key].object, Shape):
+                    msg.append([key, [self.swift_dict[key].object.fk_dict()]])
+                elif isinstance(self.swift_dict[key].object, rtb.Robot):
+                    msg.append([
+                        key,
+                        self.swift_dict[key].object._fk_dict(
+                            self.swift_dict[key].robot_alpha,
+                            self.swift_dict[key].collision_alpha,
+                        )
+                    ])
 
         events = self._send_socket("shape_poses", msg, True)
         return json.loads(events)

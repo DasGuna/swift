@@ -9,8 +9,8 @@ import swift
 
 env = swift.Swift()
 print(f"USER SCRIPT: Starting SWIFT | path to swift: {swift.__path__}")
-# env.launch(realtime=True, open_tab=True, headless=True)
-env.launch(realtime=True, open_tab=True)
+env.launch(realtime=True, headless=True)
+env.launch(realtime=True)
 print(f"USER SCRIPT: SWIFT Started")
 
 
@@ -20,6 +20,10 @@ robot.q = robot.qr
 # Set a desired and effector pose an an offset from the current end-effector pose
 Tep = robot.fkine(robot.q) * sm.SE3.Tx(0.2) * sm.SE3.Ty(0.2) * sm.SE3.Tz(0.45)
 # env.add(robot)
+id = env.add(robot)
+time.sleep(5)
+env.new_remove(id)
+time.sleep(5)
 env.add(robot)
 # print(f"USER SCRIPT: Waiting for 10 sec...")
 # time.sleep(10)
@@ -37,17 +41,17 @@ env.add(axes)
 # time.sleep(10)
 
 # ---[WORKING] TEST ADDITION OF SPLAT
-path = os.path.dirname(os.path.realpath(__file__)) + "/data/point_cloud.splat"
-splat = {
-    'stype': 'splat', 
-    'filename': path, 
-    't': [0,0,0],
-    'scale': [0.05, 0.05, 0.05],
-    'euler': [1.5708, 0, 0]
-    }
-env.add(splat)
+# path = os.path.dirname(os.path.realpath(__file__)) + "/data/point_cloud.splat"
+# splat = {
+#     'stype': 'splat', 
+#     'filename': path, 
+#     't': [0,0,0],
+#     'scale': [0.05, 0.05, 0.05],
+#     'euler': [1.5708, 0, 0]
+#     }
+# env.add(splat)
 print(f"USER SCRIPT: Waiting for 10 sec...")
-time.sleep(10)
+# time.sleep(10)
 
 # ---[WORKING] TEST SIMULATION OF ROBOT
 # Simulate the robot while it has not arrived at the goal
@@ -78,5 +82,5 @@ while not arrived_final:
     env.step(0.01)
 
 # END WAIT (DEBUGGING)
-# time.sleep(600)
+time.sleep(600)
 env.close()
