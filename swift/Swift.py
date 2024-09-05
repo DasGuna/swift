@@ -485,14 +485,14 @@ class Swift:
         if isinstance(swift_data.object, Shape):
             swift_data.object._propogate_scene_tree()
             # NOTE: need to send the already configured ID to the webpage rather than get from the client
-            id = int(self._send_socket("shape", [swift_data.object.to_dict()]))
+            vis_id = int(self._send_socket("shape", [swift_data.object.to_dict()]))
 
             # Wait for mount of object in visualiser
-            while not int(self._send_socket("shape_mounted", [id, 1])):
+            while not int(self._send_socket("shape_mounted", [vis_id, 1])):
                 time.sleep(0.1)
             
             # Finalise id in object
-            swift_data.object.vis_id = id
+            swift_data.vis_id = vis_id
         elif isinstance(swift_data.object, SwiftElement):
             # TODO: this needs testing
             # NOTE: need to send the already configured ID to the webpage rather than get from the client
@@ -510,20 +510,20 @@ class Swift:
                 collision_alpha=swift_data.collision_alpha
             )
             # NOTE: need to send the already configured ID to the webpage rather than get from the client
-            id = self._send_socket("shape", robob)
+            vis_id = self._send_socket("shape", robob)
 
             # Wait for mount of object in visualiser
-            while not int(self._send_socket("shape_mounted", [id, len(robob)])):
+            while not int(self._send_socket("shape_mounted", [vis_id, len(robob)])):
                 time.sleep(0.1)
 
             # Finalise id in object
-            swift_data.object.vis_id = id
+            swift_data.vis_id = vis_id
         elif swift_data.is_splat:
             # TODO: handle this as an object - currently only the params are sent (which is wrongly set as an 'object')
-            id = int(self._send_socket("shape", [swift_data.object]))
+            vis_id = int(self._send_socket("shape", [swift_data.object]))
 
             # Finalise id in object
-            swift_data.object.vis_id = id
+            swift_data.vis_id = vis_id
         else:
             # Nothing to do
             pass
@@ -573,7 +573,7 @@ class Swift:
             self.elements[str(swift_id)] = ob
             ob._id = swift_id
             # Update swift object dictionary
-            self.swift_dict[int(swift_id)] = SwiftData(obj=ob, in_sim=True)
+            self.swift_dict[int(swift_id)] = SwiftData(object=ob, in_sim=True)
             return int(swift_id)
         elif isinstance(ob, rtb.Robot):
             # Update robot transforms
@@ -599,11 +599,9 @@ class Swift:
             # Currently only handling splat cases (passed in as a dict of params)
             # TODO: improve this
             if isinstance(ob, dict) and ob['stype'] == 'splat':
-                # self.swift_objects.append(ob)
-                # id = len(self.swift_objects)
                 swift_id = len(self.swift_dict)
                 self.swift_dict[int(swift_id)] = SwiftData(object=ob, in_sim=True, is_splat=True)
-                return int(id)
+                return int(swift_id)
             else:
                 return -2
 

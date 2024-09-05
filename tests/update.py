@@ -21,8 +21,9 @@ robot.q = robot.qr
 Tep = robot.fkine(robot.q) * sm.SE3.Tx(0.2) * sm.SE3.Ty(0.2) * sm.SE3.Tz(0.45)
 # env.add(robot)
 id = env.add(robot)
-time.sleep(5)
-env.new_remove(id)
+print(f"id: {id}")
+# time.sleep(5)
+# env.new_remove(id)
 time.sleep(5)
 env.add(robot)
 # print(f"USER SCRIPT: Waiting for 10 sec...")
@@ -41,15 +42,15 @@ env.add(axes)
 # time.sleep(10)
 
 # ---[WORKING] TEST ADDITION OF SPLAT
-# path = os.path.dirname(os.path.realpath(__file__)) + "/data/point_cloud.splat"
-# splat = {
-#     'stype': 'splat', 
-#     'filename': path, 
-#     't': [0,0,0],
-#     'scale': [0.05, 0.05, 0.05],
-#     'euler': [1.5708, 0, 0]
-#     }
-# env.add(splat)
+path = os.path.dirname(os.path.realpath(__file__)) + "/data/point_cloud.splat"
+splat = {
+    'stype': 'splat', 
+    'filename': path, 
+    't': [0,0,0],
+    'scale': [0.05, 0.05, 0.05],
+    'euler': [1.5708, 0, 0]
+    }
+env.add(splat)
 print(f"USER SCRIPT: Waiting for 10 sec...")
 # time.sleep(10)
 
