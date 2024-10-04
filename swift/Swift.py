@@ -18,6 +18,7 @@ from typing import Union
 from typing_extensions import Literal as L
 from dataclasses import dataclass
 from threading import Thread, Lock
+import typing, py_trees
 
 # --- ADDITIONAL SETUP
 rtb = None
@@ -116,8 +117,6 @@ class Swift:
         self.socket_manager = None
         # Lock
         self.lock = Lock()
-
-
         self.headless = False
         self.rendering = True
         self._notrenderperiod = 1
@@ -280,7 +279,7 @@ class Swift:
             for key in _swift_dict.keys():
                 # If the object is not yet in the visualisation, serve and track
                 if not _swift_dict[key].in_vis:
-                    self.visualiser_add_object(_swift_dict[key])
+                    self.visualiser_add_object(_swift_dict[key], key)
                     _swift_dict[key].in_vis = True
 
                 # If the object is flagged for removal, remove from client
@@ -473,7 +472,7 @@ class Swift:
     #
     #  Methods to interface with the robots created in other environemnts
     #
-    def visualiser_add_object(self, swift_data: SwiftData = None):
+    def visualiser_add_object(self, swift_data: SwiftData = None, key: str = None):
         """Serve objects to a connected client 
         """
         # Handle error on serve (if the visualiser is not running or data is empty)
@@ -484,8 +483,14 @@ class Swift:
         # If connected, serve to client webpage (for visual display)
         if isinstance(swift_data.object, Shape):
             swift_data.object._propogate_scene_tree()
-            # NOTE: need to send the already configured ID to the webpage rather than get from the client
-            vis_id = int(self._send_socket("shape", [swift_data.object.to_dict()]))
+
+            data_dict: dict = swift_data.object.to_dict()
+            data_dict['uuid'] = key
+            # Convert colour to hex string value for visualisation
+            data_dict['color'] = f"#{('%x' % data_dict['color'])}"
+
+            print(f"object: {data_dict}")
+            vis_id = int(self._send_socket("shape", [data_dict]))
 
             # Wait for mount of object in visualiser
             while not int(self._send_socket("shape_mounted", [vis_id, 1])):
@@ -497,7 +502,12 @@ class Swift:
             # TODO: this needs testing
             # NOTE: need to send the already configured ID to the webpage rather than get from the client
             # print(f"ELEMENT params sent: {swift_data.object.to_dict()}")
-            self._send_socket("element", swift_data.object.to_dict())
+            data_dict: dict = swift_data.object.to_dict()
+            data_dict['uuid'] = key
+            # Convert colour to hex string value for visualisation
+            data_dict['color'] = f"#{('%x' % data_dict['color'])}"
+
+            self._send_socket("element", data_dict)
         elif isinstance(swift_data.object, rtb.Robot):
             # Update robot transforms
             swift_data.object._update_link_tf()
@@ -509,6 +519,12 @@ class Swift:
                 robot_alpha=swift_data.robot_alpha, 
                 collision_alpha=swift_data.collision_alpha
             )
+            # Only provide key onto base mesh object in list (for visual selection)
+            robob[0]['uuid'] = key
+            # Convert colour to hex string value for visualisation
+            for mesh in robob:
+                mesh['color'] = f"#{('%x' % mesh['color'])}"
+
             # NOTE: need to send the already configured ID to the webpage rather than get from the client
             vis_id = self._send_socket("shape", robob)
 
@@ -520,7 +536,9 @@ class Swift:
             swift_data.vis_id = vis_id
         elif swift_data.is_splat:
             # TODO: handle this as an object - currently only the params are sent (which is wrongly set as an 'object')
-            vis_id = int(self._send_socket("shape", [swift_data.object]))
+            data_dict: dict = swift_data.object
+            data_dict['uuid'] = key
+            vis_id = int(self._send_socket("shape", [data_dict]))
 
             # Finalise id in object
             swift_data.vis_id = vis_id
@@ -536,12 +554,90 @@ class Swift:
         if isinstance(swift_data.object, rtb.Robot) or isinstance(swift_data.object, Shape):
             self._send_socket(code="remove",data=swift_data.vis_id)
 
+    def update_tree(self, 
+            snapshot_visitor: py_trees.visitors.DisplaySnapshotVisitor, 
+            btree: py_trees.trees.BehaviourTree):
+        # From: https://py-trees.readthedocs.io/en/devel/demos.html#py_trees.demos.logging.create_tree
+        # # Handle error on type
+        if not isinstance(btree, py_trees.trees.BehaviourTree):
+            print(f"[SWIFT] -> Error, btree not a vaild BehaviourTree type")
+            return
+        if not isinstance(snapshot_visitor, py_trees.visitors.DisplaySnapshotVisitor):
+            print(f"[SWIFT] -> Error, snapshot_visitor not a vaild DisplaySnapshotVisitor type")
+            return
+        
+        x_pad = 10
+        x_val = 0
+        y_val = 0
+        y_pad = 20
+        if snapshot_visitor.changed:
+            tree_serialisation = {"tick": btree.count, "nodes": [], "connections": []}
+            for node in btree.root.iterate():
+                node_type_str = "Behaviour"
+                for behaviour_type in [
+                    py_trees.composites.Sequence,
+                    py_trees.composites.Selector,
+                    py_trees.composites.Parallel,
+                    py_trees.decorators.Decorator,
+                    ]:
+                    if isinstance(node, behaviour_type):
+                        node_type_str = behaviour_type.__name__
+
+                if node.tip() is not None:
+                    node_tip = node.tip()
+                    assert node_tip is not None 
+                    node_tip_id = str(node_tip.id)
+                else:
+                    node_tip_id = "none"
+
+                node_snapshot = {
+                    "name": node.name,
+                    "id": str(node.id),
+                    "parent_id": str(node.parent.id) if node.parent else "none",
+                    "child_ids": [str(child.id) for child in node.children],
+                    "tip_id": node_tip_id,
+                    "class_name": str(node.__module__) + "." + str(type(node).__name__),
+                    "type": node_type_str,
+                    "status": node.status.value,
+                    "message": node.feedback_message,
+                    "is_active": True if node.id in snapshot_visitor.visited else False,
+                }
+                print(f"NODE: {node.name}")
+                node_snapshot
+                swift_snapshot = {
+                    'id': str(node.id),
+                    'data': { 'label': node.name },
+                    'position': { 'x': x_val, 'y': y_val},
+                    "is_active": 1 if node.id in snapshot_visitor.visited else 0,
+                }
+                for child in node.children:
+                    print(f"child: {child.name}")
+                    connection = { 
+                      'id': str(node.id) + str(child.id), 
+                      'source': str(node.id), 
+                      'target': str(child.id) 
+                    }
+                    typing.cast(list, tree_serialisation["connections"]).append(connection)
+
+                
+                x_val += x_pad
+                y_val += y_pad
+                # if connections:
+                    # typing.cast(list, tree_serialisation["connections"]).append(connections)
+                typing.cast(list, tree_serialisation["nodes"]).append(swift_snapshot)
+            print("----")
+            print(tree_serialisation)
+            print("!!!!")
+
+
     # TODO: rename once finalised
-    def add(self, ob, robot_alpha=1.0, collision_alpha=0.0, readonly=False):
+    def add(self, ob, uuid: str = None, robot_alpha: float = 1.0, collision_alpha: float = 0.0, readonly: bool = False):
         """Addition method that is agnostic of socket connection
 
         :param ob: _description_
         :type ob: _type_
+        :param uuid: A string unique identifier
+        :type uuid: str 
         :param robot_alpha: _description_, defaults to 1.0
         :type robot_alpha: float, optional
         :param collision_alpha: _description_, defaults to 0.0
@@ -565,16 +661,17 @@ class Swift:
             self.swift_objects.append(ob)
             # Update swift object dictionary
             swift_id = len(self.swift_dict)
-            self.swift_dict[int(swift_id)] = SwiftData(object=ob, in_sim=True)
-            return int(swift_id)
+            self.swift_dict[uuid if uuid else int(swift_id)] = SwiftData(object=ob, in_sim=True)
+
+            # return int(swift_id)
         elif isinstance(ob, SwiftElement):
             swift_id = self.elementid
             self.elementid += 1
             self.elements[str(swift_id)] = ob
             ob._id = swift_id
             # Update swift object dictionary
-            self.swift_dict[int(swift_id)] = SwiftData(object=ob, in_sim=True)
-            return int(swift_id)
+            self.swift_dict[uuid if uuid else int(swift_id)] = SwiftData(object=ob, in_sim=True)
+            # return int(swift_id)
         elif isinstance(ob, rtb.Robot):
             # Update robot transforms
             ob._update_link_tf()
@@ -587,23 +684,26 @@ class Swift:
 
             swift_id = len(self.swift_dict)
             # Update swift object dictionary
-            self.swift_dict[int(swift_id)] = SwiftData(
+            self.swift_dict[uuid if uuid else int(swift_id)] = SwiftData(
                 object=ob, 
                 in_sim=True, 
                 robot_alpha=robot_alpha, 
                 collision_alpha=collision_alpha, 
                 readonly=readonly
             )
-            return int(swift_id)
+            # return int(swift_id)
         else:
             # Currently only handling splat cases (passed in as a dict of params)
             # TODO: improve this
             if isinstance(ob, dict) and ob['stype'] == 'splat':
                 swift_id = len(self.swift_dict)
                 self.swift_dict[int(swift_id)] = SwiftData(object=ob, in_sim=True, is_splat=True)
-                return int(swift_id)
+                # return int(swift_id)
             else:
                 return -2
+
+
+        return uuid if uuid else swift_id
 
     # KEPT AS LEGACY
     # def old_add(self, ob, robot_alpha=1.0, collision_alpha=0.0, readonly=False):
