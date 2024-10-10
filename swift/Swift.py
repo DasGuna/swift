@@ -37,6 +37,7 @@ def _import_rtb():  # pragma nocover
 class SwiftData:
     object: any = None # type: ignore
     remove_req: bool = False
+    step_req: bool = False
     in_sim: bool = False
     in_vis: bool = False
     is_splat: bool = False
@@ -44,6 +45,7 @@ class SwiftData:
     collision_alpha: float = 0.0
     readonly: int = 0
     vis_id: int = 0
+    vis_key: str = ''
 
 class Swift:
     """
@@ -277,6 +279,7 @@ class Swift:
             # Handle race conditions on user update (via remove call)
             removal_key_list = []
             for key in list(_swift_dict):
+                # print(f"Handing Key {key}")
                 # If the object is not yet in the visualisation, serve and track
                 if not _swift_dict[key].in_vis:
                     self.visualiser_add_object(_swift_dict[key], key)
@@ -288,6 +291,11 @@ class Swift:
                     self.visualiser_remove_object(_swift_dict[key])
                     # remove the object from the swift dictionary data
                     removal_key_list.append(key)
+
+                if _swift_dict[key].step_req:
+                    # print(f"Key {key} requires step")
+                    self.visualiser_step_object(_swift_dict[key], key)
+                    _swift_dict[key].step_req = False
 
                 # TODO: update state (from visualiser input)
                 # Implement a get shape poses method here for updating object state
@@ -346,6 +354,22 @@ class Swift:
             return True
         else:
             return False
+
+    def new_step(self, dt=0.05):
+         
+        # Check if the provided ID is in the configured key list for the dictionary of data
+        for key in self.swift_dict.keys():
+            if isinstance(self.swift_dict[key].object, Shape):
+                self._step_shape(self.swift_dict[key].object, dt)
+            elif isinstance(self.swift_dict[key].object, rtb.Robot):
+                self._step_robot(self.swift_dict[key].object, dt, self.swift_dict[key].readonly)
+
+            self.swift_dict[key].object._propogate_scene_tree()
+            self.swift_dict[key].step_req = True
+        
+        # Adjust sim time
+        self.sim_time += dt
+
 
     def step(self, dt=0.05, render=True):
         """
@@ -554,6 +578,27 @@ class Swift:
         
         if isinstance(swift_data.object, rtb.Robot) or isinstance(swift_data.object, Shape):
             self._send_socket(code="remove",data=swift_data.vis_id)
+
+    def visualiser_step_object(self, swift_data: SwiftData = None, key: str = None):
+        if swift_data is None or key is None:
+            return
+
+        msg = []
+
+        # New method using the dictionary
+        if swift_data.object is not None:
+            if isinstance(swift_data.object, Shape):
+                msg.append([key, [swift_data.object.fk_dict()]])
+            elif isinstance(swift_data.object, rtb.Robot):
+                msg.append([
+                    key,
+                    swift_data.object._fk_dict(
+                        swift_data.robot_alpha,
+                        swift_data.collision_alpha,
+                    )
+                ])
+
+        self._send_socket("shape_poses", msg)
 
     def update_tree(self, 
             snapshot_visitor: py_trees.visitors.DisplaySnapshotVisitor, 
@@ -1018,14 +1063,14 @@ class Swift:
         # Update the robot link transofrms based on the new q
         robot._update_link_tf()
 
-    # NOTE: does need connection to the socket
+    # NOTE: does not need connection to the socket
     def _step_shape(self, shape, dt):
 
-        if shape._changed:
-            print(f"In _step_shape -> {shape} changed")
-            shape._changed = False
-            id = self.swift_objects.index(shape)
-            self._send_socket("shape_update", [id, shape.to_dict()])
+        # if shape._changed:
+        #     print(f"In _step_shape -> {shape} changed")
+        #     shape._changed = False
+        #     id = self.swift_objects.index(shape)
+        #     self._send_socket("shape_update", [id, shape.to_dict()])
 
         step_shape(
             dt, shape.v, shape._SceneNode__T, shape._SceneNode__wT, shape._SceneNode__wq
