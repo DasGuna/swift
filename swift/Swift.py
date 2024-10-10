@@ -810,7 +810,7 @@ class Swift:
     #         return int(id)
 
     # TODO: Test and validate solution
-    def new_remove(self, id = None):
+    def remove(self, id = None):
         """Remove a robot/shape from graphical scene and simulator using ID
 
         :param object: _description_
@@ -829,42 +829,43 @@ class Swift:
             print(f"SWIFT: No such id in Swift -> {id}")
             print(f"SWIFT: Current ids -> {self.swift_dict.keys()}")
 
-    def remove(self, id):
-        """
-        Remove a robot/shape from the graphical scene
-
-        ``env.remove(robot)`` removes the ``robot`` from the graphical
-            environment.
-
-        :param id: the id of the object as returned by the ``add`` method,
-            or the instance of the object
-        :type id: Int, Robot or Shape
-        """
-
-        # ob to remove
-        idd = None
-        code = None
-
-        if isinstance(id, rtb.ERobot) or isinstance(id, Shape):
-
-            for i in range(len(self.swift_objects)):
-                if self.swift_objects[i] is not None and id == self.swift_objects[i]:
-                    idd = i
-                    code = "remove"
-                    self.swift_objects[idd] = None
-                    break
-        else:
-            # Number corresponding to robot ID
-            idd = id
-            code = "remove"
-            self.robots[idd] = None
-
-        if idd is None:
-            raise ValueError(
-                "the id argument does not correspond with a robot or shape in Swift"
-            )
-
-        self._send_socket(code, idd)
+    # LEGACY KEPT
+    # def remove(self, id):
+    #     """
+    #     Remove a robot/shape from the graphical scene
+    #
+    #     ``env.remove(robot)`` removes the ``robot`` from the graphical
+    #         environment.
+    #
+    #     :param id: the id of the object as returned by the ``add`` method,
+    #         or the instance of the object
+    #     :type id: Int, Robot or Shape
+    #     """
+    #
+    #     # ob to remove
+    #     idd = None
+    #     code = None
+    #
+    #     if isinstance(id, rtb.ERobot) or isinstance(id, Shape):
+    #
+    #         for i in range(len(self.swift_objects)):
+    #             if self.swift_objects[i] is not None and id == self.swift_objects[i]:
+    #                 idd = i
+    #                 code = "remove"
+    #                 self.swift_objects[idd] = None
+    #                 break
+    #     else:
+    #         # Number corresponding to robot ID
+    #         idd = id
+    #         code = "remove"
+    #         self.robots[idd] = None
+    #
+    #     if idd is None:
+    #         raise ValueError(
+    #             "the id argument does not correspond with a robot or shape in Swift"
+    #         )
+    #
+    #     self._send_socket(code, idd)
 
     def hold(self):  # pragma: no cover
         """
@@ -1020,13 +1021,16 @@ class Swift:
     def _step_shape(self, shape, dt):
 
         if shape._changed:
+            print(f"In _step_shape -> {shape} changed")
             shape._changed = False
             id = self.swift_objects.index(shape)
             self._send_socket("shape_update", [id, shape.to_dict()])
 
+        print(f"In _step_shape -> {shape} prior to step")
         step_shape(
             dt, shape.v, shape._SceneNode__T, shape._SceneNode__wT, shape._SceneNode__wq
         )
+        print(f"In _step_shape -> {shape} after step")
         if shape.collision:
             shape._update_pyb()
 
@@ -1049,7 +1053,7 @@ class Swift:
     def _draw_all(self):
         """
         Sends the transform of every simulated object in the scene
-        Recieves bacl a list of events which has occured
+        Recieves back a list of events which has occured
         """
 
         msg = []
@@ -1058,6 +1062,7 @@ class Swift:
         for key in self.swift_dict.keys():
             if self.swift_dict[key].object is not None:
                 if isinstance(self.swift_dict[key].object, Shape):
+                    print(f"In _draw_all -> Updating shape: {self.swift_dict[key].object}")
                     msg.append([key, [self.swift_dict[key].object.fk_dict()]])
                 elif isinstance(self.swift_dict[key].object, rtb.Robot):
                     msg.append([

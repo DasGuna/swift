@@ -253,4 +253,3 @@ CATKIN_IGNORE
 # Extra ignores (temp)
 tests/*
 !tests/update.py
-# swift/out/_next/*
