@@ -204,22 +204,11 @@ class Swift:
         # added bonuses regarding GPU computation (say if the simulator was running on a lower PC, but the visualisation occured on 
         # better hardware on the same network)
         if not self.headless:
-            # The realtime, render and pause buttons
+            # TODO: Implement the realtime, render and pause buttons when ready
             # self._add_controls()
 
             # A flag for our threads to monitor for when to quit
             self._run_thread = True
-            # NOTE: older method from SwiftRoute
-            # self.socket, self.server, self.test_thread = start_servers(
-            #     outq=self.outq,
-            #     inq=self.inq,
-            #     stop_servers=self._servers_running,
-            #     socket_status=self._socket_status,
-            #     test=self._test_thread,
-            #     browser=browser,
-            #     comms=self._comms,
-            #     open_tab=self.open_tab
-            # )
             # NOTE: new method from SwiftSocket
             print(f"SWIFT: Setting up Socket...")
             self.socket_server, self.page_client, self.socket_manager = start_servers(
@@ -365,7 +354,8 @@ class Swift:
         self.swift_dict[key].visible = visible
         self.swift_dict[key].visible_req = True
 
-    def new_step(self, dt=0.05):
+    # NOTE: new method in development
+    def step(self, dt=0.05):
          
         # Check if the provided ID is in the configured key list for the dictionary of data
         for key in self.swift_dict.keys():
@@ -381,88 +371,90 @@ class Swift:
         # Adjust sim time
         self.sim_time += dt
 
+        # TODO: add the realtime component
 
-    def step(self, dt=0.05, render=True):
-        """
-        Update the graphical scene
-
-        :param dt: time step in seconds, defaults to 0.05
-        :type dt: int, optional
-        :param render: render the change in Swift. If True, this updates the
-            pose of the simulated robots and objects in Swift.
-        :type dt: bool, optional
-
-        ``env.step(args)`` triggers an update of the 3D scene in the Swift
-        window referenced by ``env``.
-
-        .. note::
-
-            - Each robot in the scene is updated based on
-              their control type (position, velocity, acceleration, or torque).
-            - Upon acting, the other three of the four control types will be
-              updated in the internal state of the robot object.
-            - The control type is defined by the robot object, and not all
-              robot objects support all control types.
-            - Execution is blocked for the specified interval
-
-        """
-        # TODO how is the pose of shapes updated prior to step?
-
-        # Update local pose of objects
-        # New implementation with main data dictionary of objects
-        for key in self.swift_dict.keys():
-            if isinstance(self.swift_dict[key].object, Shape):
-                self._step_shape(self.swift_dict[key].object, dt)
-            elif isinstance(self.swift_dict[key].object, rtb.Robot):
-                self._step_robot(self.swift_dict[key].object, dt, self.swift_dict[key].readonly)
-
-        for key in self.swift_dict.keys():
-            self.swift_dict[key].object._propogate_scene_tree()
-
-        # Adjust sim time
-        self.sim_time += dt
-
-        # print(f"RUNNING => sim_time: {self.sim_time} | Connected: {self._vis_running}")
-        # NOTE: only run if not headless and the visualiser is successfully launched and all objects have been served
-        if not self.headless and self._vis_running and self.objects_loaded():
-
-            if render and self.rendering:
-
-                if self.realtime:
-                    # If realtime is set, delay progress if we are
-                    # running too quickly
-                    time_taken = time.time() - self.last_time
-                    diff = (dt * self._skipped) - time_taken
-                    self._skipped = 1
-
-                    if diff > 0:
-                        time.sleep(diff)
-
-                    self.last_time = time.time()
-                elif (time.time() - self._laststep) < self._period:
-                    # Only render at 60 FPS
-                    self._skipped += 1
-                    return
-
-                self._laststep = time.time()
-
-                # NOTE: does need connection to the socket
-                self._step_elements()
-
-                # NOTE: does need connection to the socket
-                events = self._draw_all()
-
-                # Process GUI events
-                self.process_events(events)
-
-            elif not self.rendering:
-                if (time.time() - self._laststep) < self._notrenderperiod:
-                    return
-                self._laststep = time.time()
-                events = json.loads(self._send_socket("shape_poses", [], True))
-                self.process_events(events)
-
-            self._send_socket("sim_time", self.sim_time, expected=False)
+    # TODO: LEGACY - keep until new method is updated
+    # def step(self, dt=0.05, render=True):
+    #     """
+    #     Update the graphical scene
+    #
+    #     :param dt: time step in seconds, defaults to 0.05
+    #     :type dt: int, optional
+    #     :param render: render the change in Swift. If True, this updates the
+    #         pose of the simulated robots and objects in Swift.
+    #     :type dt: bool, optional
+    #
+    #     ``env.step(args)`` triggers an update of the 3D scene in the Swift
+    #     window referenced by ``env``.
+    #
+    #     .. note::
+    #
+    #         - Each robot in the scene is updated based on
+    #           their control type (position, velocity, acceleration, or torque).
+    #         - Upon acting, the other three of the four control types will be
+    #           updated in the internal state of the robot object.
+    #         - The control type is defined by the robot object, and not all
+    #           robot objects support all control types.
+    #         - Execution is blocked for the specified interval
+    #
+    #     """
+    #     # TODO how is the pose of shapes updated prior to step?
+    #
+    #     # Update local pose of objects
+    #     # New implementation with main data dictionary of objects
+    #     for key in self.swift_dict.keys():
+    #         if isinstance(self.swift_dict[key].object, Shape):
+    #             self._step_shape(self.swift_dict[key].object, dt)
+    #         elif isinstance(self.swift_dict[key].object, rtb.Robot):
+    #             self._step_robot(self.swift_dict[key].object, dt, self.swift_dict[key].readonly)
+    #
+    #     for key in self.swift_dict.keys():
+    #         self.swift_dict[key].object._propogate_scene_tree()
+    #
+    #     # Adjust sim time
+    #     self.sim_time += dt
+    #
+    #     # print(f"RUNNING => sim_time: {self.sim_time} | Connected: {self._vis_running}")
+    #     # NOTE: only run if not headless and the visualiser is successfully launched and all objects have been served
+    #     if not self.headless and self._vis_running and self.objects_loaded():
+    #
+    #         if render and self.rendering:
+    #
+    #             if self.realtime:
+    #                 # If realtime is set, delay progress if we are
+    #                 # running too quickly
+    #                 time_taken = time.time() - self.last_time
+    #                 diff = (dt * self._skipped) - time_taken
+    #                 self._skipped = 1
+    #
+    #                 if diff > 0:
+    #                     time.sleep(diff)
+    #
+    #                 self.last_time = time.time()
+    #             elif (time.time() - self._laststep) < self._period:
+    #                 # Only render at 60 FPS
+    #                 self._skipped += 1
+    #                 return
+    #
+    #             self._laststep = time.time()
+    #
+    #             # NOTE: does need connection to the socket
+    #             self._step_elements()
+    #
+    #             # NOTE: does need connection to the socket
+    #             events = self._draw_all()
+    #
+    #             # Process GUI events
+    #             self.process_events(events)
+    #
+    #         elif not self.rendering:
+    #             if (time.time() - self._laststep) < self._notrenderperiod:
+    #                 return
+    #             self._laststep = time.time()
+    #             events = json.loads(self._send_socket("shape_poses", [], True))
+    #             self.process_events(events)
+    #
+    #         self._send_socket("sim_time", self.sim_time, expected=False)
 
     def reset(self):
         """
@@ -504,9 +496,8 @@ class Swift:
         self._send_socket("close", "0", False)
         self._stop_threads()
 
-    # -- NEW METHODS
     #
-    #  Methods to interface with the robots created in other environemnts
+    #  Methods to interface to a web-based UI if using
     #
     def visualiser_add_object(self, swift_data: SwiftData = None, key: str = None):
         """Serve objects to a connected client 
@@ -616,9 +607,97 @@ class Swift:
             return
 
         if swift_data.object is not None:
-            print(f"Sending Shape Visible")
             self._send_socket(code="shape_visible", data=[key, swift_data.visible])
 
+    #
+    #  Methods for user interaction to package. No UI direct interaction by default (headless agnostic)
+    #
+    def add(self, ob, uuid: str = None, robot_alpha: float = 1.0, collision_alpha: float = 0.0, readonly: bool = False):
+        """Addition method that is agnostic of socket connection
+
+        :param ob: Object to be added to the simulator 
+        :type ob: spatialgeometry.Shape, SwiftElement, or roboticstoolbox.Robot 
+        :param uuid: A string unique identifier
+        :type uuid: str 
+        :param robot_alpha: alpha of object, defaults to 1.0
+        :type robot_alpha: float, optional
+        :param collision_alpha: alpha of object collision geometry, defaults to 0.0
+        :type collision_alpha: float, optional
+        :param readonly: interactivity disable for roboticstoolbox.Robot only, defaults to False
+        :type readonly: bool, optional
+        :return: configured uuid (if successful).  
+        :rtype: str if successful, or < 0 if in error 
+        """
+        # Testing error case prior to general addition
+        for key in self.swift_dict.keys():
+            if id(ob) == id(self.swift_dict[key].object):
+                print(f"SWIFT: {id(ob)} unique ID already added to captured dictionary {id(self.swift_dict[key].object)}")
+                print(f"SWIFT: Ignoring as object is already in swift...")
+                return -1 
+            
+        # print(f"SWIFT: entrypoint to new add method")
+        if isinstance(ob, Shape):
+            ob._propogate_scene_tree()
+            # id = len(self.swift_objects)
+            self.swift_objects.append(ob)
+            # Update swift object dictionary
+            swift_id = len(self.swift_dict)
+            self.swift_dict[uuid if uuid else int(swift_id)] = SwiftData(object=ob, in_sim=True)
+        elif isinstance(ob, SwiftElement):
+            swift_id = self.elementid
+            self.elementid += 1
+            self.elements[str(swift_id)] = ob
+            ob._id = swift_id
+            # Update swift object dictionary
+            self.swift_dict[uuid if uuid else int(swift_id)] = SwiftData(object=ob, in_sim=True)
+        elif isinstance(ob, rtb.Robot):
+            # Update robot transforms
+            ob._update_link_tf()
+            ob._propogate_scene_tree()
+            # Update robot qlim
+            ob._qlim = ob.qlim
+            # Update id based on list of objects
+            self.swift_objects.append(ob)
+            swift_id = len(self.swift_dict)
+            # Update swift object dictionary
+            self.swift_dict[uuid if uuid else int(swift_id)] = SwiftData(
+                object=ob, 
+                in_sim=True, 
+                robot_alpha=robot_alpha, 
+                collision_alpha=collision_alpha, 
+                readonly=readonly
+            )
+        else:
+            # Currently only handling splat cases (passed in as a dict of params)
+            # TODO: improve this
+            if isinstance(ob, dict) and ob['stype'] == 'splat':
+                swift_id = len(self.swift_dict)
+                self.swift_dict[uuid if uuid else int(swift_id)] = SwiftData(object=ob, in_sim=True, is_splat=True)
+            else:
+                return -2
+
+        return uuid if uuid else swift_id
+
+    def remove(self, uuid: str = None):
+        """Remove a robot/shape from graphical scene and simulator using ID
+
+        :param uuid: The unique identifier provided by the user for an already configured object 
+        :type uuid: str 
+        """
+        # Handle error condition if no id was provided
+        if id is None:
+            return
+        
+        # ID takes precedence in removal (as multiple objects may be of the same type)
+        # Check if the provided ID is in the configured key list for the dictionary of data
+        if id in self.swift_dict.keys():
+            # Request removal from dictionary in running socket thread
+            self.swift_dict[id].remove_req = True
+        else:
+            print(f"SWIFT: No such id in Swift -> {id}")
+            print(f"SWIFT: Current ids -> {self.swift_dict.keys()}")
+
+    # TODO: This is still in development
     def update_tree(self, 
             snapshot_visitor: py_trees.visitors.DisplaySnapshotVisitor, 
             btree: py_trees.trees.BehaviourTree):
@@ -693,244 +772,6 @@ class Swift:
             print("----")
             print(tree_serialisation)
             print("!!!!")
-
-
-    # TODO: rename once finalised
-    def add(self, ob, uuid: str = None, robot_alpha: float = 1.0, collision_alpha: float = 0.0, readonly: bool = False):
-        """Addition method that is agnostic of socket connection
-
-        :param ob: _description_
-        :type ob: _type_
-        :param uuid: A string unique identifier
-        :type uuid: str 
-        :param robot_alpha: _description_, defaults to 1.0
-        :type robot_alpha: float, optional
-        :param collision_alpha: _description_, defaults to 0.0
-        :type collision_alpha: float, optional
-        :param readonly: _description_, defaults to False
-        :type readonly: bool, optional
-        :return: configured id (if successful).  
-        :rtype: int > 0 if successful, or < 0 if in error 
-        """
-        # Testing error case prior to general addition
-        for key in self.swift_dict.keys():
-            if id(ob) == id(self.swift_dict[key].object):
-                print(f"SWIFT: {id(ob)} unique ID already added to captured dictionary {id(self.swift_dict[key].object)}")
-                print(f"SWIFT: Ignoring as object is already in swift...")
-                return -1 
-            
-        # print(f"SWIFT: entrypoint to new add method")
-        if isinstance(ob, Shape):
-            ob._propogate_scene_tree()
-            # id = len(self.swift_objects)
-            self.swift_objects.append(ob)
-            # Update swift object dictionary
-            swift_id = len(self.swift_dict)
-            self.swift_dict[uuid if uuid else int(swift_id)] = SwiftData(object=ob, in_sim=True)
-        elif isinstance(ob, SwiftElement):
-            swift_id = self.elementid
-            self.elementid += 1
-            self.elements[str(swift_id)] = ob
-            ob._id = swift_id
-            # Update swift object dictionary
-            self.swift_dict[uuid if uuid else int(swift_id)] = SwiftData(object=ob, in_sim=True)
-        elif isinstance(ob, rtb.Robot):
-            # Update robot transforms
-            ob._update_link_tf()
-            ob._propogate_scene_tree()
-            # Update robot qlim
-            ob._qlim = ob.qlim
-            # Update id based on list of objects
-            self.swift_objects.append(ob)
-            swift_id = len(self.swift_dict)
-            # Update swift object dictionary
-            self.swift_dict[uuid if uuid else int(swift_id)] = SwiftData(
-                object=ob, 
-                in_sim=True, 
-                robot_alpha=robot_alpha, 
-                collision_alpha=collision_alpha, 
-                readonly=readonly
-            )
-        else:
-            # Currently only handling splat cases (passed in as a dict of params)
-            # TODO: improve this
-            if isinstance(ob, dict) and ob['stype'] == 'splat':
-                swift_id = len(self.swift_dict)
-                self.swift_dict[uuid if uuid else int(swift_id)] = SwiftData(object=ob, in_sim=True, is_splat=True)
-            else:
-                return -2
-
-        return uuid if uuid else swift_id
-
-    # KEPT AS LEGACY
-    # def old_add(self, ob, robot_alpha=1.0, collision_alpha=0.0, readonly=False):
-    #     """
-    #     Add a robot to the graphical scene
-
-    #     :param ob: the object to add
-    #     :type ob: Robot or Shape
-    #     :param robot_alpha: Robot visual opacity. If 0, then the geometries
-    #         are invisible, defaults to 1.0
-    #     :type robot_alpha: bool, optional
-    #     :param collision_alpha: Robot collision visual opacity. If 0, then
-    #         the geometries defaults to 0.0
-    #     :type collision_alpha: float, optional
-    #     :param readonly: If true, swift will not modify any robot attributes,
-    #         the robot is only being displayed, not simulated,
-    #         defaults to False
-    #     :type readonly: bool, optional
-    #     :return: object id within visualizer
-    #     :rtype: int
-
-    #     ``id = env.add(robot)`` adds the ``robot`` to the graphical
-    #         environment.
-
-    #     .. note::
-
-    #         - Adds the robot object to a list of robots which will be updated
-    #           when the ``step()`` method is called.
-
-    #     """
-    #     # id = add(robot) adds the robot to the external environment. robot
-    #     # must be of an appropriate class. This adds a robot object to a
-    #     # list of robots which will act upon the step() method being called.
-    #     # NOTE: addition here (if socket is not open, will mean the object is never added)
-    #     #       future implementation should attempt to add, append (as currently) and attempt
-    #     #       a re-addition upon connection. A possible way to segregate these is to have
-    #     #       the higher level add (this method) simply perform the 'non-headless' function
-    #     #       with a separate add method to update the client (once connected) with 'added' objects
-    #     if isinstance(ob, Shape):
-    #         ob._propogate_scene_tree()
-    #         # NOTE: This method should be set true when successfully added to client (upon connection)
-    #         # TODO: Move this to server side add method (when ready)
-    #         ob._added_to_swift = True
-    #         print(f"params sent: {ob.to_dict()}")
-    #         # NOTE: this section to be moved to socket side addition method
-    #         if not self.headless:
-    #             id = int(self._send_socket("shape", [ob.to_dict()]))
-
-    #             while not int(self._send_socket("shape_mounted", [id, 1])):
-    #                 time.sleep(0.1)
-
-    #         else:
-    #             id = len(self.swift_objects)
-
-    #         self.swift_objects.append(ob)
-    #         return int(id)
-    #     elif isinstance(ob, SwiftElement):
-
-    #         # NOTE: This section should be set true when successfully added to client (upon connection)
-    #         # TODO: Move this to server side add method (when ready)
-    #         if ob._added_to_swift:
-    #             raise ValueError("This element has already been added to Swift")
-    #         ob._added_to_swift = True
-
-    #         # id = 'customelement' + str(self.elementid)
-    #         id = self.elementid
-    #         self.elementid += 1
-    #         self.elements[str(id)] = ob
-    #         ob._id = id
-
-    #         # NOTE: this section to be moved to socket side addition method
-    #         self._send_socket("element", ob.to_dict())
-    #     elif isinstance(ob, rtb.Robot):
-
-    #         # if ob.base is None:
-    #         #     ob.base = sm.SE3()
-
-    #         # ob._swift_readonly = readonly
-    #         # ob._show_robot = show_robot
-    #         # ob._show_collision = show_collision
-
-    #         # Update robot transforms
-    #         ob._update_link_tf()
-    #         ob._propogate_scene_tree()
-
-    #         # Update robot qlim
-    #         ob._qlim = ob.qlim
-            
-    #         print(f"SWIFT: adding robot...")
-
-    #         # NOTE: this section to be moved to socket side addition method
-    #         if not self.headless:
-    #             robob = ob._to_dict(
-    #                 robot_alpha=robot_alpha, collision_alpha=collision_alpha
-    #             )
-    #             id = self._send_socket("shape", robob)
-
-    #             while not int(self._send_socket("shape_mounted", [id, len(robob)])):
-    #                 time.sleep(0.1)
-
-    #         else:
-    #             id = len(self.swift_objects)
-
-    #         self.swift_objects.append(ob)
-
-    #         self.swift_options[int(id)] = {
-    #             "robot_alpha": robot_alpha,
-    #             "collision_alpha": collision_alpha,
-    #             "readonly": readonly,
-    #         }
-
-    #         return int(id)
-
-    # TODO: Test and validate solution
-    def remove(self, id = None):
-        """Remove a robot/shape from graphical scene and simulator using ID
-
-        :param object: _description_
-        :type object: _type_
-        """
-        # Handle error condition if no id was provided
-        if id is None:
-            return
-        
-        # ID takes precedence in removal (as multiple objects may be of the same type)
-        # Check if the provided ID is in the configured key list for the dictionary of data
-        if id in self.swift_dict.keys():
-            # Request removal from dictionary in running socket thread
-            self.swift_dict[id].remove_req = True
-        else:
-            print(f"SWIFT: No such id in Swift -> {id}")
-            print(f"SWIFT: Current ids -> {self.swift_dict.keys()}")
-
-    # LEGACY KEPT
-    # def remove(self, id):
-    #     """
-    #     Remove a robot/shape from the graphical scene
-    #
-    #     ``env.remove(robot)`` removes the ``robot`` from the graphical
-    #         environment.
-    #
-    #     :param id: the id of the object as returned by the ``add`` method,
-    #         or the instance of the object
-    #     :type id: Int, Robot or Shape
-    #     """
-    #
-    #     # ob to remove
-    #     idd = None
-    #     code = None
-    #
-    #     if isinstance(id, rtb.ERobot) or isinstance(id, Shape):
-    #
-    #         for i in range(len(self.swift_objects)):
-    #             if self.swift_objects[i] is not None and id == self.swift_objects[i]:
-    #                 idd = i
-    #                 code = "remove"
-    #                 self.swift_objects[idd] = None
-    #                 break
-    #     else:
-    #         # Number corresponding to robot ID
-    #         idd = id
-    #         code = "remove"
-    #         self.robots[idd] = None
-    #
-    #     if idd is None:
-    #         raise ValueError(
-    #             "the id argument does not correspond with a robot or shape in Swift"
-    #         )
-    #
-    #     self._send_socket(code, idd)
 
     def hold(self):  # pragma: no cover
         """
