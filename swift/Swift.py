@@ -662,8 +662,6 @@ class Swift:
             # Update swift object dictionary
             swift_id = len(self.swift_dict)
             self.swift_dict[uuid if uuid else int(swift_id)] = SwiftData(object=ob, in_sim=True)
-
-            # return int(swift_id)
         elif isinstance(ob, SwiftElement):
             swift_id = self.elementid
             self.elementid += 1
@@ -671,7 +669,6 @@ class Swift:
             ob._id = swift_id
             # Update swift object dictionary
             self.swift_dict[uuid if uuid else int(swift_id)] = SwiftData(object=ob, in_sim=True)
-            # return int(swift_id)
         elif isinstance(ob, rtb.Robot):
             # Update robot transforms
             ob._update_link_tf()
@@ -679,9 +676,7 @@ class Swift:
             # Update robot qlim
             ob._qlim = ob.qlim
             # Update id based on list of objects
-            # id = len(self.swift_objects)
             self.swift_objects.append(ob)
-
             swift_id = len(self.swift_dict)
             # Update swift object dictionary
             self.swift_dict[uuid if uuid else int(swift_id)] = SwiftData(
@@ -691,17 +686,14 @@ class Swift:
                 collision_alpha=collision_alpha, 
                 readonly=readonly
             )
-            # return int(swift_id)
         else:
             # Currently only handling splat cases (passed in as a dict of params)
             # TODO: improve this
             if isinstance(ob, dict) and ob['stype'] == 'splat':
                 swift_id = len(self.swift_dict)
-                self.swift_dict[int(swift_id)] = SwiftData(object=ob, in_sim=True, is_splat=True)
-                # return int(swift_id)
+                self.swift_dict[uuid if uuid else int(swift_id)] = SwiftData(object=ob, in_sim=True, is_splat=True)
             else:
                 return -2
-
 
         return uuid if uuid else swift_id
 
