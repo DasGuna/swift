@@ -46,6 +46,8 @@ class SwiftData:
     readonly: int = 0
     vis_id: int = 0
     vis_key: str = ''
+    visible: bool = True
+    visible_req: bool = False 
 
 class Swift:
     """
@@ -297,6 +299,10 @@ class Swift:
                     self.visualiser_step_object(_swift_dict[key], key)
                     _swift_dict[key].step_req = False
 
+                if _swift_dict[key].visible_req:
+                    self.visualiser_visible_update(_swift_dict[key], key)
+                    _swift_dict[key].visible_req = False
+
                 # TODO: update state (from visualiser input)
                 # Implement a get shape poses method here for updating object state
             
@@ -354,6 +360,10 @@ class Swift:
             return True
         else:
             return False
+
+    def set_visible(self, key: str, visible: bool = True):
+        self.swift_dict[key].visible = visible
+        self.swift_dict[key].visible_req = True
 
     def new_step(self, dt=0.05):
          
@@ -600,6 +610,14 @@ class Swift:
                 ])
 
         self._send_socket("shape_poses", msg)
+
+    def visualiser_visible_update(self, swift_data: SwiftData = None, key: str = None):
+        if swift_data is None or key is None:
+            return
+
+        if swift_data.object is not None:
+            print(f"Sending Shape Visible")
+            self._send_socket(code="shape_visible", data=[key, swift_data.visible])
 
     def update_tree(self, 
             snapshot_visitor: py_trees.visitors.DisplaySnapshotVisitor, 
