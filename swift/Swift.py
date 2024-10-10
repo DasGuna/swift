@@ -276,7 +276,7 @@ class Swift:
 
             # Handle race conditions on user update (via remove call)
             removal_key_list = []
-            for key in _swift_dict.keys():
+            for key in list(_swift_dict):
                 # If the object is not yet in the visualisation, serve and track
                 if not _swift_dict[key].in_vis:
                     self.visualiser_add_object(_swift_dict[key], key)
