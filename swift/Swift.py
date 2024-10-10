@@ -361,10 +361,11 @@ class Swift:
         for key in self.swift_dict.keys():
             if isinstance(self.swift_dict[key].object, Shape):
                 self._step_shape(self.swift_dict[key].object, dt)
+                self.swift_dict[key].object._propogate_scene_tree()
             elif isinstance(self.swift_dict[key].object, rtb.Robot):
                 self._step_robot(self.swift_dict[key].object, dt, self.swift_dict[key].readonly)
+                self.swift_dict[key].object._propogate_scene_tree()
 
-            self.swift_dict[key].object._propogate_scene_tree()
             self.swift_dict[key].step_req = True
         
         # Adjust sim time
