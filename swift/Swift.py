@@ -1026,11 +1026,9 @@ class Swift:
             id = self.swift_objects.index(shape)
             self._send_socket("shape_update", [id, shape.to_dict()])
 
-        print(f"In _step_shape -> {shape} prior to step")
         step_shape(
             dt, shape.v, shape._SceneNode__T, shape._SceneNode__wT, shape._SceneNode__wq
         )
-        print(f"In _step_shape -> {shape} after step")
         if shape.collision:
             shape._update_pyb()
 
@@ -1062,7 +1060,6 @@ class Swift:
         for key in self.swift_dict.keys():
             if self.swift_dict[key].object is not None:
                 if isinstance(self.swift_dict[key].object, Shape):
-                    print(f"In _draw_all -> Updating shape: {self.swift_dict[key].object}")
                     msg.append([key, [self.swift_dict[key].object.fk_dict()]])
                 elif isinstance(self.swift_dict[key].object, rtb.Robot):
                     msg.append([
