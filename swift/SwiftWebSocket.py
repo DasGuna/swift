@@ -29,6 +29,7 @@ class SwiftSocket:
         self.USERS = set()
         self.loop = asyncio.new_event_loop()
         self.name = "SWIFT SOCKET"
+        self.terminate = False
         asyncio.set_event_loop(self.loop)
 
         # Attempt websocket serve to available port within range
@@ -36,9 +37,9 @@ class SwiftSocket:
         port = 53000
         while not started and port < 62000:
             try:
-                print(f"{self.name}: Starting Socket...")
+                # print(f"{self.name}: Starting Socket...")
                 start_server = websockets.serve(self.serve, "localhost", port)
-                print(f"{self.name}: Started Socket!")
+                # print(f"{self.name}: Started Socket!")
                 self.loop.run_until_complete(start_server)
                 started = True
             except OSError:
@@ -58,17 +59,18 @@ class SwiftSocket:
         :param path: _description_
         :type path: _type_
         """
-        print(f"{self.name}: Socket Initialising...")
+        # print(f"{self.name}: Socket Initialising... | terminate flag: {self.terminate}")
         # Initial connection handshake to available client
         # Store client as a set (non-duplicates)
         await self.register(websocket)
         recieved = await websocket.recv()
         # Send back connected status on successfull connection to client (static page)
         self.inq.put(recieved)
+        self.connected(check=True)
         
         # Now onto send, recieve cycle
-        print(f"{self.name}: Socket Running...")
-        while self.run():
+        # print(f"{self.name}: Socket Running...")
+        while self.run() and not self.terminate:
             # Get data from Swift through producer method
             message = await self.producer()
             expected = message[0]
@@ -79,10 +81,10 @@ class SwiftSocket:
             await self.expect_message(websocket, expected)
 
         # Termination requested (updated through self.run())
-        print(f"{self.name}: Socket Terminating...")
+        # print(f"{self.name}: Socket Terminating...")
         # Add any other cleanup activites (if required)
-        self.connected = False
-        print(f"{self.name}: Socket Terminated")
+        self.connected(check=False)
+        # print(f"{self.name}: Socket Terminated")
         return
 
     # --- Data in and out methods
@@ -95,9 +97,13 @@ class SwiftSocket:
         :type expected: _type_
         """
         # Update swift with any received data that was expected
-        if expected:
-            recieved = await websocket.recv()
-            self.inq.put(recieved)
+        try:
+            if expected:
+                recieved = await websocket.recv()
+                self.inq.put(recieved)
+        except websockets.exceptions.ConnectionClosedOK as e:
+            # print(f"{self.name}: Socket CLOSED -> {e}")
+            self.terminate = True
 
     async def producer(self):
         """Producer method that gets data from queue (as provided by Swift)
@@ -270,7 +276,6 @@ def start_servers(outq: Queue, inq: Queue, stop_servers, socket_status, socket_m
     server.name = "Thread-Page-Client" 
     server.start()
     server_port = inq.get()
-    print(f"SOCKET SETUP: Available at => http://localhost:{server_port}/?{socket_port}") 
 
     # Start a connection checking thread (for headless implementation)
     manager = Thread(target=socket_manager, daemon=True)
@@ -278,5 +283,8 @@ def start_servers(outq: Queue, inq: Queue, stop_servers, socket_status, socket_m
     manager.name = "Thread-Socket-Manager" 
     manager.start()
 
+    # Output for User
+    print(f"SWIFT: Available at => http://localhost:{server_port}/?{socket_port}") 
+
     # Return thread handlers to higher-level caller for thread termination
-    return socket, server, manager
+    return socket, server, manager, socket_port, server_port

@@ -126,7 +126,10 @@ class Swift:
         self._notrenderperiod = 1
         self.recording = False
         self._vis_running = False
+        self._vis_prev_running = False
         self._laststep = time.time()
+        self._page_port = None
+        self._server_port = None
 
     @property
     def rate(self):
@@ -211,7 +214,7 @@ class Swift:
             self._run_thread = True
             # NOTE: new method from SwiftSocket
             print(f"SWIFT: Setting up Socket...")
-            self.socket_server, self.page_client, self.socket_manager = start_servers(
+            self.socket_server, self.page_client, self.socket_manager, self._page_port, self._server_port = start_servers(
                 outq=self.outq,
                 inq=self.inq,
                 stop_servers=self._servers_running,
@@ -234,8 +237,9 @@ class Swift:
         self.lock.release()
 
         # Confirm if running or not to validate connection
+        # print(f"SWIFT: SOCKET MANAGER -> BEGINNING VIS RUNNING STATE {_vis_running}")
         if not _vis_running:
-            print(f"SWIFT: SOCKET MANAGER -> ESTABLISHING NEW SOCKET...")
+            # print(f"SWIFT: SOCKET MANAGER -> ESTABLISHING NEW SOCKET...")
 
             # Wait for connection to establish correctly
             while True:
@@ -250,10 +254,8 @@ class Swift:
             # Clear queue on initial connection (will send back a connected from client)
             self.inq.get()
         else:
-            print(f"SWIFT: SOCKET MANAGER -> SOCKET CONNECTION ALREADY ESTABLISHED")
-
-        # Socket connection made!
-        print(f"SWIFT: SOCKET MANAGER -> SOCKET CONNECTION IS: {self._vis_running}")
+            pass
+            # print(f"SWIFT: SOCKET MANAGER -> SOCKET CONNECTION ALREADY ESTABLISHED")
         
         # Iterate through existing objects and handle updating while connected
         # TODO: handle removal of objects in thread
@@ -265,6 +267,7 @@ class Swift:
             self.lock.release()
 
             if not _vis_running:
+                print(f"SWIFT: SOCKET MANAGER -> visualiser is not running. Breaking...")
                 break
 
             # Handle race conditions on user update (via remove call)
@@ -304,9 +307,22 @@ class Swift:
             self._swift_dict = _swift_dict
             self.lock.release()
 
-            time.sleep(0.1)
+            time.sleep(0.01)
         
-        print(f"SWIFT: SOCKET MANAGER -> End of Thread Reached")
+        # Reset objects in dictionary for reload (if user re-opens page)
+        self.lock.acquire()
+        _swift_dict = self._swift_dict
+        self.lock.release()
+
+        for key in list(_swift_dict):
+            _swift_dict[key].in_vis = False
+            _swift_dict[key].remove_req = False
+            _swift_dict[key].step_req = False
+            _swift_dict[key].visible_req = False
+
+        self.lock.acquire()
+        self._swift_dict = _swift_dict
+        self.lock.release()
 
     def _socket_status(self, check: bool):
         """Thread call to update the visualiser running method
@@ -315,6 +331,9 @@ class Swift:
         :type check: bool
         """
         with self.lock:
+            # Handle reload of threads with a 'previously running' state
+            if self._vis_running:
+                self._vis_prev_running = True
             self._vis_running = check 
         
     def _servers_running(self):
@@ -367,6 +386,17 @@ class Swift:
                 self.swift_dict[key].object._propogate_scene_tree()
 
             self.swift_dict[key].step_req = True
+
+        # Reset of static page on close (if we are still stepping the simulator)
+        if not self._vis_running and self._vis_prev_running:
+            self._stop_threads()
+            self.launch(
+                realtime=self.realtime,
+                headless=self.headless,
+                rate=self.rate,
+                browser=self.browser,
+            )
+            self._vis_prev_running = False
         
         # Adjust sim time
         self.sim_time += dt
@@ -516,7 +546,7 @@ class Swift:
             # Convert colour to hex string value for visualisation
             data_dict['color'] = f"#{('%x' % data_dict['color'])}"
 
-            print(f"object: {data_dict}")
+            # Send object information to visualiser
             vis_id = int(self._send_socket("shape", [data_dict]))
 
             # Wait for mount of object in visualiser
@@ -685,14 +715,14 @@ class Swift:
         :type uuid: str 
         """
         # Handle error condition if no id was provided
-        if id is None:
+        if uuid is None:
             return
         
         # ID takes precedence in removal (as multiple objects may be of the same type)
         # Check if the provided ID is in the configured key list for the dictionary of data
-        if id in self.swift_dict.keys():
+        if uuid in self.swift_dict.keys():
             # Request removal from dictionary in running socket thread
-            self.swift_dict[id].remove_req = True
+            self.swift_dict[uuid].remove_req = True
         else:
             print(f"SWIFT: No such id in Swift -> {id}")
             print(f"SWIFT: Current ids -> {self.swift_dict.keys()}")
@@ -991,7 +1021,7 @@ class Swift:
         if expected:
             ret = "0"
             try:
-                ret = self.inq.get(block=True)
+                ret = self.inq.get(timeout=1)
                 # print(f"SWIFT: send socket return val: {ret}")
             except Empty:
                 print(f"SWIFT: cannot connect to client")
