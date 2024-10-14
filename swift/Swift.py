@@ -48,6 +48,8 @@ class SwiftData:
     vis_key: str = ''
     visible: bool = True
     visible_req: bool = False 
+    tree_data: bool = False 
+    tree_update_req: bool = False 
 
 class Swift:
     """
@@ -130,6 +132,9 @@ class Swift:
         self._laststep = time.time()
         self._page_port = None
         self._server_port = None
+
+        # Initialise a base tree in dictionary for updating
+        self.swift_dict['pytree'] = SwiftData(object={}, tree_data=True) 
 
     @property
     def rate(self):
@@ -295,6 +300,10 @@ class Swift:
                     self.visualiser_visible_update(_swift_dict[key], key)
                     _swift_dict[key].visible_req = False
 
+                if _swift_dict[key].tree_update_req:
+                    print(f"SWIFT: TREE UPDATE")
+                    self.visualiser_tree_update(_swift_dict[key])
+                    _swift_dict[key].tree_update_req = False
                 # TODO: update state (from visualiser input)
                 # Implement a get shape poses method here for updating object state
             
@@ -639,6 +648,13 @@ class Swift:
         if swift_data.object is not None:
             self._send_socket(code="shape_visible", data=[key, swift_data.visible])
 
+    def visualiser_tree_update(self, swift_data: SwiftData = None):
+        if swift_data is None:
+            return 
+        
+        if swift_data.object is not None and swift_data.tree_data:
+            self._send_socket(code="tree_update", data=[swift_data.object])
+
     #
     #  Methods for user interaction to package. No UI direct interaction by default (headless agnostic)
     #
@@ -729,14 +745,14 @@ class Swift:
 
     # TODO: This is still in development
     def update_tree(self, 
-            snapshot_visitor: py_trees.visitors.DisplaySnapshotVisitor, 
+            snapshot_visitor: py_trees.visitors.SnapshotVisitor, 
             btree: py_trees.trees.BehaviourTree):
         # From: https://py-trees.readthedocs.io/en/devel/demos.html#py_trees.demos.logging.create_tree
         # # Handle error on type
         if not isinstance(btree, py_trees.trees.BehaviourTree):
             print(f"[SWIFT] -> Error, btree not a vaild BehaviourTree type")
             return
-        if not isinstance(snapshot_visitor, py_trees.visitors.DisplaySnapshotVisitor):
+        if not isinstance(snapshot_visitor, py_trees.visitors.SnapshotVisitor):
             print(f"[SWIFT] -> Error, snapshot_visitor not a vaild DisplaySnapshotVisitor type")
             return
         
@@ -776,7 +792,7 @@ class Swift:
                     "message": node.feedback_message,
                     "is_active": True if node.id in snapshot_visitor.visited else False,
                 }
-                print(f"NODE: {node.name}")
+                # print(f"NODE: {node.name}")
                 node_snapshot
                 swift_snapshot = {
                     'id': str(node.id),
@@ -785,7 +801,7 @@ class Swift:
                     "is_active": 1 if node.id in snapshot_visitor.visited else 0,
                 }
                 for child in node.children:
-                    print(f"child: {child.name}")
+                    # print(f"child: {child.name}")
                     connection = { 
                       'id': str(node.id) + str(child.id), 
                       'source': str(node.id), 
@@ -796,12 +812,12 @@ class Swift:
                 
                 x_val += x_pad
                 y_val += y_pad
-                # if connections:
-                    # typing.cast(list, tree_serialisation["connections"]).append(connections)
                 typing.cast(list, tree_serialisation["nodes"]).append(swift_snapshot)
-            print("----")
-            print(tree_serialisation)
-            print("!!!!")
+            # print("----")
+            # print(tree_serialisation)
+            self.swift_dict['pytree'].object=tree_serialisation  
+            self.swift_dict['pytree'].tree_update_req=True
+            # print("!!!!")
 
     def hold(self):  # pragma: no cover
         """
