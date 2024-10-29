@@ -48,6 +48,8 @@ class SwiftData:
     vis_key: str = ''
     visible: bool = True
     visible_req: bool = False 
+    colour: str = '#fff'
+    colour_req: bool = False 
     tree_data: bool = False 
     tree_update_req: bool = False 
 
@@ -218,7 +220,6 @@ class Swift:
             # A flag for our threads to monitor for when to quit
             self._run_thread = True
             # NOTE: new method from SwiftSocket
-            print(f"SWIFT: Setting up Socket...")
             self.socket_server, self.page_client, self.socket_manager, self._page_port, self._server_port = start_servers(
                 outq=self.outq,
                 inq=self.inq,
@@ -272,7 +273,7 @@ class Swift:
             self.lock.release()
 
             if not _vis_running:
-                print(f"SWIFT: SOCKET MANAGER -> visualiser is not running. Breaking...")
+                # print(f"SWIFT: SOCKET MANAGER -> visualiser is not running. Breaking...")
                 break
 
             # Handle race conditions on user update (via remove call)
@@ -300,10 +301,14 @@ class Swift:
                     self.visualiser_visible_update(_swift_dict[key], key)
                     _swift_dict[key].visible_req = False
 
+                if _swift_dict[key].colour_req:
+                    self.visualiser_colour_update(_swift_dict[key], key)
+                    _swift_dict[key].colour_req = False
+
                 if _swift_dict[key].tree_update_req:
-                    print(f"SWIFT: TREE UPDATE")
                     self.visualiser_tree_update(_swift_dict[key])
                     _swift_dict[key].tree_update_req = False
+
                 # TODO: update state (from visualiser input)
                 # Implement a get shape poses method here for updating object state
             
@@ -328,6 +333,7 @@ class Swift:
             _swift_dict[key].remove_req = False
             _swift_dict[key].step_req = False
             _swift_dict[key].visible_req = False
+            _swift_dict[key].colour_req = False
 
         self.lock.acquire()
         self._swift_dict = _swift_dict
@@ -381,6 +387,10 @@ class Swift:
     def set_visible(self, key: str, visible: bool = True):
         self.swift_dict[key].visible = visible
         self.swift_dict[key].visible_req = True
+
+    def set_colour(self, key: str, colour: str):
+        self.swift_dict[key].colour = colour
+        self.swift_dict[key].colour_req = True
 
     # NOTE: new method in development
     def step(self, dt=0.05):
@@ -647,6 +657,13 @@ class Swift:
 
         if swift_data.object is not None:
             self._send_socket(code="shape_visible", data=[key, swift_data.visible])
+
+    def visualiser_colour_update(self, swift_data: SwiftData = None, key: str = None):
+        if swift_data is None or key is None:
+            return
+
+        if swift_data.object is not None:
+            self._send_socket(code="shape_colour", data=[key, swift_data.colour])
 
     def visualiser_tree_update(self, swift_data: SwiftData = None):
         if swift_data is None:
